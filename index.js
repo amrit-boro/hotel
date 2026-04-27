@@ -33,22 +33,6 @@ const server = http.createServer(app);
 
 // REMOVED: Socket.IO initialization
 
-// 4. CORS CONFIGURATION
-// const corsOptions = {
-//   origin: (origin, callback) => {
-//     if (!origin) return callback(null, true);
-//     if (whitelist.indexOf(origin) !== -1) {
-//       callback(null, true);
-//     } else {
-//       console.error(`Blocked by CORS: ${origin}`);
-//       callback(new Error("Not allowed by CORS"));
-//     }
-//   },
-//   credentials: true,
-//   methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
-//   allowedHeaders: ["Content-Type", "Authorization"],
-// };
-
 // ==================================================
 // 🛡️ SECURITY & MIDDLEWARE STACK
 // ==================================================
@@ -67,7 +51,7 @@ app.use("/api", limiter);
 // C. CORS
 app.use(
   cors({
-    origin: "http://10.233.127.165:5173",
+    origin: "http://10.223.127.165.165:5173",
     credentials: true,
   }),
 );
@@ -98,7 +82,7 @@ app.use((req, res, next) => {
   next();
 });
 
-app.use("/api/auth", authrouter);
+app.use("/api/v1/auth", authrouter);
 app.use("/api/hotel", manageHotel);
 // app.use("/api/hotelStaff", manageHotelstaff);
 app.use("/api/v1/menu", hotelMenu);

@@ -30,10 +30,14 @@ const sendErrorProd = (err, res) => {
 };
 
 const handleDuplicateFieldsDb = (err) => {
-  // fallback handling for nested errorResponse
-  const value = err.keyValue ? err.keyValue.email : "";
-  const message = `${value} already exists. Please use another.`;
-  return new AppError(message, 400);
+  if (!err.keyValue || Object.keys(err.keyValue).length === 0) {
+    return new AppError("Duplicate field error", 400);
+  }
+
+  const field = Object.keys(err.keyValue)[0];
+  const value = err.keyValue[field];
+
+  return new AppError(`This ${field} is already registered.`, 400);
 };
 
 const handleCastErrorDB = (err) => {

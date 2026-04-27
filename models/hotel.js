@@ -1,28 +1,37 @@
 const mongoose = require("mongoose");
 const bcrypt = require("bcryptjs");
 
-const HotelSchema = new mongoose.Schema({
-  ownerId: {
-    type: mongoose.Schema.Types.ObjectId,
-    ref: "User",
-    required: true,
-  },
-  name: { type: String, required: true },
-  location: { type: String },
-  logoUrl: { type: String, default: "123img.jpg" },
-  kitchenPassword: { type: String, default: "1234" },
+const HotelSchema = new mongoose.Schema(
+  {
+    ownerId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "User",
+      required: true,
+    },
+    name: { type: String, required: [true, "Hotel name is required"] },
+    location: { type: String, trim: true },
+    logoUrl: { type: String, trim: true, default: "123img.jpg" },
 
-  // --- SAAS / BUSINESS CONTROL ---
-  // If they stop paying you, set this to false to disable their QR codes
-  isActive: { type: Boolean, default: true },
-  subscriptionPlan: {
-    type: String,
-    enum: ["free_trial", "basic", "premium"],
-    default: "free_trial",
+    // --- SAAS / BUSINESS CONTROL ---
+    // If they stop paying you, set this to false to disable their QR codes
+    isActive: { type: Boolean, default: true },
+    subscriptionPlan: {
+      type: String,
+      enum: ["free_trial", "basic", "premium"],
+      default: "free_trial",
+    },
+    subscriptionExpiresAt: Date,
+    // Soft Delete (better than removing data permanently)
+    isDeleted: {
+      type: Boolean,
+      default: false,
+      select: false,
+    },
   },
-
-  createdAt: { type: Date, default: Date.now },
-});
+  {
+    timestamps: true,
+  },
+);
 
 // ===============================================================================
 // pre

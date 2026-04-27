@@ -7,14 +7,27 @@ const dotenv = require("dotenv");
 // Ensure this path is correct based on where you run 'npm start'
 dotenv.config({ path: "./.env" });
 
-// 2. DEBUG: Check if keys are loading (Remove this later)
-console.log("Cloud Name from Env:", process.env.CLOUDINARY_CLOUD_NAME);
-
 // 3. Configure Cloudinary
 cloudinary.config({
   cloud_name: process.env.CLOUDINARY_CLOUD_NAME, // FIXED TYPO (Removed 'E')
   api_key: process.env.CLOUDINARY_API_KEY,
   api_secret: process.env.CLOUDINARY_API_SECRET,
+});
+
+// 1) Set up the imageStorage
+const imageStorage = new CloudinaryStorage({
+  cloudinary: cloudinary,
+  params: {
+    folder: "Hotel",
+    allowed_formats: ["jpeg", "jpg", "png", "webp"],
+    transformation: [{ quality: "auto", fetch_format: "auto" }],
+  },
+});
+
+// photo upload
+const uploadImage = multer({
+  storage: imageStorage,
+  limits: { fileSize: 5 * 1024 * 1024 }, // 5MB limit
 });
 
 // 4. Configure Storage
@@ -26,6 +39,4 @@ const storage = new CloudinaryStorage({
   },
 });
 
-const parser = multer({ storage: storage });
-
-module.exports = { parser, cloudinary };
+module.exports = { uploadImage, cloudinary };
