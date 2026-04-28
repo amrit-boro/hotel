@@ -51,6 +51,56 @@ const determineHotelId = async (user, providedId) => {
 // ======================================================
 // 🟢 PUBLIC ROUTE: Get Menu (For QR App)
 // ======================================================
+exports.allItem = catchAsync(async (req, res, next) => {
+  const {
+    category,
+    hotelId,
+    veg,
+    search,
+    sort = "-createdAt",
+    page = 1,
+    limit = 10,
+  } = req.query;
+
+  // 1. Build filter object dynamically
+  const filter = {};
+
+  if (category) {
+    filter.category = { $regex: `^${category}$`, $options: "i" };
+  }
+
+  if (hotelId) {
+    filter.hotelId = hotelId;
+  }
+
+  if (veg !== undefined) {
+    filter.veg = veg === "true";
+  }
+  // Always filter available items
+  filter.isAvailable = true;
+  // 2. Search (on name + description)
+  if (search) {
+    filter.$or = [
+      { name: { $regex: search, $options: "i" } },
+      { description: { $regex: search, $options: "i" } },
+    ];
+  }
+  // 3. Pagination
+  const skip = (page - 1) * limit;
+  const items = await MenuItem.find(filter)
+    .sort(sort)
+    .skip(skip)
+    .limit(Number(limit));
+
+  res.status(200).json({
+    status: "success",
+    results: items.length,
+    page: Number(page),
+    data: {
+      items,
+    },
+  });
+});
 
 exports.getItem = catchAsync(async (req, res, next) => {
   const { itemId: id } = req.params;
@@ -103,6 +153,71 @@ exports.hotelMenu = catchAsync(async (req, res, next) => {
   });
 });
 
+// CREATE MENU =============
+
+exports.createMenu = catchAsync(async (req, res, next) => {
+  const {
+    hotelId,
+    name,
+    category,
+    description,
+    veg,
+    price,
+    image,
+    options,
+    isAvailable,
+  } = req.body;
+
+  // 1. Validate required fields
+  if (!hotelId || !name || !category || price === undefined) {
+    return next(new AppError("Missing required fields", 400));
+  }
+
+  // 2. Validate objectsId
+  if (!mongoose.Types.ObjectId.isValid(hotelId)) {
+    return next(new AppError("Invalid hotelId", 400));
+  }
+
+  //3. Normalize options (for consistency)
+  let normalizedOptions = [];
+  if (Array.isArray(options)) {
+    normalizedOptions = options.map((opt) => ({
+      name: opt.name?.trim(),
+      required: Boolean(opt.required),
+      choices: Array.isArray(opt.choices)
+        ? opt.choices.map((choice) => ({
+            name: choice.name?.trim(),
+            priceMod: Number(choice.priceMod) || 0,
+          }))
+        : [],
+    }));
+  }
+
+  // 4. Create menu item
+  const menuItem = await MenuItem.create({
+    hotelId,
+    name: name.trim(),
+    category: category.trim(),
+    description: description?.trim() || "",
+    veg: veg !== undefined ? veg : true, // if veg is not undefind use that veg otherwise true
+    price: Number(price),
+    image: {
+      url: image?.url || "",
+      publicId: image?.publicId || "",
+    },
+    isAvailable: isAvailable !== undefined ? isAvailable : true,
+    options: normalizedOptions,
+  });
+
+  // 5. Response
+  res.status(201).json({
+    status: "Success",
+    data: {
+      menuItem,
+    },
+  });
+});
+
 exports.addMenu = catchAsync(async (req, res, next) => {
   let { hotelId, name, price, category, options, description } = req.body;
 
@@ -152,6 +267,9 @@ exports.addMenu = catchAsync(async (req, res, next) => {
 
   res.status(201).json({ success: true, data: newItem });
 });
+
+// UPDATE MENU =============
+
 exports.updateMenu = catchAsync(async (req, res, next) => {
   const itemId = req.params.id;
 

@@ -25,7 +25,7 @@ exports.createHotel = catchAsync(async (req, res, next) => {
           ownerId: userid,
         },
       ],
-      { session }
+      { session },
     );
 
     console.log("new Hotel: ", newHotel);
@@ -47,7 +47,7 @@ exports.createHotel = catchAsync(async (req, res, next) => {
           },
         },
       ],
-      { session }
+      { session },
     );
 
     console.log("hotelStaff: ", hotelstaff);
@@ -81,3 +81,5 @@ exports.createHotel = catchAsync(async (req, res, next) => {
     return next(err);
   }
 });
+
+exports.createHotel = catchAsync(async (req, res, next) => {});

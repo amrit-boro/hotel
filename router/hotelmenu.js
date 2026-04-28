@@ -5,15 +5,19 @@ const authController = require("../controller/authController");
 const router = express.Router();
 
 // CUSTOMER WILL SCAN AND GET THE MENU---------------------------------
-router.get("/:hotelId", hotelMenuController.hotelMenu);
+router.get("/", hotelMenuController.allItem);
 
 // Item details ===================
 router.get("/item/:itemId", hotelMenuController.getItem);
 
 // ======================================================
 // router.use(authController.protect);
-// add menu----------------------------------------
-router.post("/add", uploadImage.single("image"), hotelMenuController.addMenu);
+// CREATE MENU ==============
+router.post(
+  "/create",
+  uploadImage.single("image"),
+  hotelMenuController.createMenu,
+);
 
 // ======================================================
 // 2. UPDATE ITEM (With Image)
