@@ -84,7 +84,7 @@ app.use((req, res, next) => {
 });
 
 app.use("/api/v1/auth", authrouter);
-app.use("/api/hotel", manageHotel);
+app.use("/api/v1/hotel", manageHotel);
 // app.use("/api/hotelStaff", manageHotelstaff);
 app.use("/api/v1/menu", hotelMenu);
 // app.use("/api/orders", order);

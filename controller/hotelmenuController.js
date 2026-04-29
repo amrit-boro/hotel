@@ -50,7 +50,7 @@ const determineHotelId = async (user, providedId) => {
 };
 
 // ======================================================
-// 🟢 PUBLIC ROUTE: Get Menu (For QR App)
+//  Get Menu (For QR App)
 // ======================================================
 // exports.allItem = catchAsync(async (req, res, next) => {
 //   const {
@@ -104,14 +104,13 @@ const determineHotelId = async (user, providedId) => {
 // });
 
 exports.allItem = catchAsync(async (req, res, next) => {
-  // Set reasonable limits for production
-  const limit = Math.min(parseInt(req.query.limit) || 20, 50);
-  req.query.limit = limit;
+  // Exclude soft deleted items by default
+  const query = {
+    isAvailable: true,
+    softDeleted: { $ne: true }, // Don't show soft deleted items
+  };
 
-  const features = new APIFeatures(
-    MenuItem.find({ isAvailable: true }).lean(), // Use lean() for better performance
-    req.query,
-  )
+  const features = new APIFeatures(MenuItem.find(query).lean(), req.query)
     .filter()
     .search()
     .sort()
@@ -120,10 +119,9 @@ exports.allItem = catchAsync(async (req, res, next) => {
 
   let items = await features.query;
 
-  // Filter out unavailable choices from each menu item
+  // Filter out unavailable choices
   if (items && items.length > 0) {
     items = items.map((item) => {
-      // Skip if no options
       if (
         !item.options ||
         !Array.isArray(item.options) ||
@@ -132,16 +130,11 @@ exports.allItem = catchAsync(async (req, res, next) => {
         return item;
       }
 
-      // Process each option and filter choices
       const filteredOptions = [];
-
       for (const option of item.options) {
-        // Filter available choices
         const availableChoices = option.choices.filter(
           (choice) => choice.isAvailable === true,
         );
-
-        // Only keep options that have at least one available choice
         if (availableChoices.length > 0) {
           filteredOptions.push({
             ...option,
@@ -158,9 +151,7 @@ exports.allItem = catchAsync(async (req, res, next) => {
   res.status(200).json({
     status: "success",
     results: items.length,
-    data: {
-      items,
-    },
+    data: { items },
   });
 });
 
@@ -215,8 +206,9 @@ exports.hotelMenu = catchAsync(async (req, res, next) => {
   });
 });
 
-// CREATE MENU =============
-
+// ==========================================================
+// CREATE MENU
+// ==========================================================
 exports.createMenu = catchAsync(async (req, res, next) => {
   const {
     hotelId,
@@ -330,7 +322,9 @@ exports.addMenu = catchAsync(async (req, res, next) => {
   res.status(201).json({ success: true, data: newItem });
 });
 
-// UPDATE MENU =============
+// =============================================================
+// UPDATE MENU
+// =============================================================
 
 // exports.updateMenu = catchAsync(async (req, res, next) => {
 //   const itemId = req.params.id;
@@ -477,6 +471,45 @@ exports.updateMenu = catchAsync(async (req, res, next) => {
   });
 });
 
+// Bulk update multiple choices availability
+exports.bulkUpdateChoicesAvailability = catchAsync(async (req, res, next) => {
+  const { id } = req.params;
+  const { updates } = req.body; // Array of { optionIndex, choiceIndex, isAvailable }
+
+  if (!mongoose.Types.ObjectId.isValid(id)) {
+    return next(new AppError("Invalid menu item ID", 400));
+  }
+
+  if (!updates || !Array.isArray(updates) || updates.length === 0) {
+    return next(new AppError("Updates array is required", 400));
+  }
+
+  const menuItem = await MenuItem.findById(id);
+  if (!menuItem) {
+    return next(new AppError("No menu item found with that ID", 404));
+  }
+
+  // Apply all updates
+  for (const update of updates) {
+    const { optionIndex, choiceIndex, isAvailable } = update;
+
+    if (menuItem.options[optionIndex]?.choices[choiceIndex]) {
+      menuItem.options[optionIndex].choices[choiceIndex].isAvailable =
+        isAvailable;
+    }
+  }
+
+  await menuItem.save();
+
+  res.status(200).json({
+    status: "success",
+    message: `Updated ${updates.length} choice(s)`,
+    data: {
+      item: menuItem,
+    },
+  });
+});
+
 // Update specific choice availability (most common use case)
 exports.updateChoiceAvailability = catchAsync(async (req, res, next) => {
   const { id } = req.params;
@@ -533,29 +566,414 @@ exports.updateChoiceAvailability = catchAsync(async (req, res, next) => {
   });
 });
 
-// 3) DELETE ITEM-----------------------------------
-exports.deleteMenu = catchAsync(async (req, res, next) => {
-  const itemId = req.params.id;
+// Add new option to existing menu item
+exports.addOption = catchAsync(async (req, res, next) => {
+  const { id } = req.params;
+  const { name, required, choices } = req.body;
 
-  // 1. Find Item
-  const item = await MenuItem.findById(itemId);
-  if (!item) return next(new AppError("Item Not found", 404));
-
-  // 2. Permission Check
-  const isAllowed = await menuPermission.checkMenuPermission(
-    req.user._id.toString(),
-    item.hotelId.toString(),
-  );
-  if (!isAllowed) return next(new AppError("Access Denied.", 403));
-
-  // 3. DELETE IMAGE FROM CLOUD (Option 2 Logic)
-  // We have the exact Public ID, so this is 100% safe.
-  if (item.image && item.image.publicId) {
-    await cloudinary.uploader.destroy(item.image.publicId);
+  if (!mongoose.Types.ObjectId.isValid(id)) {
+    return next(new AppError("Invalid menu item ID", 400));
   }
 
-  // 4. DELETE FROM DB
-  await MenuItem.findByIdAndDelete(itemId);
+  if (!name || !choices || !Array.isArray(choices)) {
+    return next(
+      new AppError("Option name and choices array are required", 400),
+    );
+  }
 
-  res.status(200).json({ success: true, msg: "Item and Image deleted." });
+  // Check Menu
+  const menuItem = await MenuItem.findById(id);
+  if (!menuItem) {
+    return next(new AppError("No menu item found with that ID", 404));
+  }
+
+  const processedChoices = choices.map((choice) => ({
+    name: choice.name,
+    priceMod: choice.priceMod,
+    isAvailable: choice.isAvailable !== undefined ? choice.isAvailable : true,
+  }));
+
+  // Push to menu
+  menuItem.options.push({
+    name,
+    required: required || false,
+    choices: processedChoices,
+  });
+
+  await menuItem.save();
+
+  res.status(201).json({
+    status: "success",
+    data: {
+      item: menuItem,
+    },
+  });
+});
+
+// Remove Option
+exports.removeOption = catchAsync(async (req, res, next) => {
+  const { id, optionIndex } = req.params;
+
+  if (!mongoose.Types.ObjectId.isValid(id)) {
+    return next(new AppError("Invalid menu item ID", 400));
+  }
+
+  const menuItem = await MenuItem.findById(id);
+  if (!menuItem) {
+    return next(new AppError("No menu item found with that ID", 404));
+  }
+
+  if (!menuItem.options[optionIndex]) {
+    return next(new AppError("Option not found", 404));
+  }
+
+  menuItem.options.splice(optionIndex, 1);
+  await menuItem.save();
+
+  res.status(200).json({
+    status: "success",
+    message: "Option removed successfully",
+    data: {
+      item: menuItem,
+    },
+  });
+});
+
+// Update specific option
+exports.updateOption = catchAsync(async (req, res, next) => {
+  const { id, optionIndex } = req.params;
+  const { name, required, choices } = req.body;
+
+  if (!mongoose.Types.ObjectId.isValid(id)) {
+    return next(new AppError("Invalid menu item ID", 400));
+  }
+
+  const menuItem = await MenuItem.findById(id);
+  if (!menuItem) {
+    return next(new AppError("No menu item found with that ID", 404));
+  }
+
+  if (!menuItem.options[optionIndex]) {
+    return next(new AppError("Option not found", 404));
+  }
+
+  // Update option fields
+  if (name) menuItem.options[optionIndex].name = name;
+  if (required !== undefined) menuItem.options[optionIndex].required = required;
+
+  // Update choices if provided
+  if (choices && Array.isArray(choices)) {
+    menuItem.options[optionIndex].choices = choices.map((choice) => ({
+      name: choice.name,
+      priceMod: choice.priceMod || 0,
+      isAvailable: choice.isAvailable !== undefined ? choice.isAvailable : true,
+    }));
+  }
+
+  await menuItem.save();
+
+  res.status(200).json({
+    status: "success",
+    data: {
+      item: menuItem,
+    },
+  });
+});
+
+// ====================================================================
+//  DELETE ITEM
+// ====================================================================
+
+// 1. Hard Delete - Permanently remove from database
+exports.deleteMenuItem = catchAsync(async (req, res, next) => {
+  const { id } = req.params;
+
+  // Validate ID format
+  if (!mongoose.Types.ObjectId.isValid(id)) {
+    return next(new AppError("Invalid menu item ID", 400));
+  }
+
+  // Find and delete permanently
+  const deletedItem = await MenuItem.findByIdAndDelete(id);
+
+  if (!deletedItem) {
+    return next(new AppError("No menu item found with that ID", 404));
+  }
+
+  res.status(200).json({
+    status: "success",
+    message: "Menu item permanently deleted",
+  });
+});
+
+exports.softDeleteMenuItem = catchAsync(async (req, res, next) => {
+  const { id } = req.params;
+
+  // Validate ID format
+  if (!mongoose.Types.ObjectId.isValid(id)) {
+    return next(new AppError("Invalid menu item ID", 400));
+  }
+
+  // Only mark as unavailable, don't delete
+  const updatedItem = await MenuItem.findByIdAndUpdate(
+    id,
+    {
+      isAvailable: false,
+      // Optional: Add softDelete flag
+      softDeleted: true,
+      softDeletedAt: new Date(),
+    },
+    {
+      new: true,
+      runValidators: true,
+    },
+  );
+
+  if (!updatedItem) {
+    return next(new AppError("No menu item found with that ID", 404));
+  }
+
+  res.status(200).json({
+    status: "success",
+    message: "Menu item has been deactivated (soft deleted)",
+    data: {
+      item: updatedItem,
+    },
+  });
+});
+
+// 3. Restore Soft Deleted Item
+exports.restoreMenuItem = catchAsync(async (req, res, next) => {
+  const { id } = req.params;
+
+  // Validate ID format
+  if (!mongoose.Types.ObjectId.isValid(id)) {
+    return next(new AppError("Invalid menu item ID", 400));
+  }
+
+  // Restore the item
+  const restoredItem = await MenuItem.findByIdAndUpdate(
+    id,
+    {
+      isAvailable: true,
+      softDeleted: false,
+      $unset: { softDeletedAt: "" },
+    },
+    {
+      new: true,
+      runValidators: true,
+    },
+  );
+
+  if (!restoredItem) {
+    return next(new AppError("No menu item found with that ID", 404));
+  }
+
+  res.status(200).json({
+    status: "success",
+    message: "Menu item restored successfully",
+    data: {
+      item: restoredItem,
+    },
+  });
+});
+
+// 4. Delete Specific Option from Menu Item
+exports.deleteOption = catchAsync(async (req, res, next) => {
+  const { id, optionIndex } = req.params;
+
+  // Validate ID format
+  if (!mongoose.Types.ObjectId.isValid(id)) {
+    return next(new AppError("Invalid menu item ID", 400));
+  }
+
+  const menuItem = await MenuItem.findById(id);
+  if (!menuItem) {
+    return next(new AppError("No menu item found with that ID", 404));
+  }
+
+  // Check if option exists
+  if (!menuItem.options[optionIndex]) {
+    return next(new AppError("Option not found", 404));
+  }
+
+  // Remove the option
+  menuItem.options.splice(optionIndex, 1);
+  await menuItem.save();
+
+  res.status(200).json({
+    status: "success",
+    message: "Option deleted successfully",
+    data: {
+      item: menuItem,
+    },
+  });
+});
+
+// 5. Delete Specific Choice from an Option
+exports.deleteChoice = catchAsync(async (req, res, next) => {
+  const { id, optionIndex, choiceIndex } = req.params;
+
+  // Validate ID format
+  if (!mongoose.Types.ObjectId.isValid(id)) {
+    return next(new AppError("Invalid menu item ID", 400));
+  }
+
+  const menuItem = await MenuItem.findById(id);
+  if (!menuItem) {
+    return next(new AppError("No menu item found with that ID", 404));
+  }
+
+  // Check if option exists
+  if (!menuItem.options[optionIndex]) {
+    return next(new AppError("Option not found", 404));
+  }
+
+  // Check if choice exists
+  if (!menuItem.options[optionIndex].choices[choiceIndex]) {
+    return next(new AppError("Choice not found", 404));
+  }
+
+  // Remove the choice
+  menuItem.options[optionIndex].choices.splice(choiceIndex, 1);
+  await menuItem.save();
+
+  res.status(200).json({
+    status: "success",
+    message: "Choice deleted successfully",
+    data: {
+      item: menuItem,
+    },
+  });
+});
+
+// 9. Clean Up Old Soft Deleted Items (Permanently delete after X days)
+exports.cleanupSoftDeletedItems = catchAsync(async (req, res, next) => {
+  const { days = 30 } = req.query; // Default: delete after 30 days
+
+  const cutoffDate = new Date();
+  cutoffDate.setDate(cutoffDate.getDate() - days);
+
+  const result = await MenuItem.deleteMany({
+    softDeleted: true,
+    softDeletedAt: { $lt: cutoffDate },
+  });
+
+  res.status(200).json({
+    status: "success",
+    message: `Permanently deleted ${result.deletedCount} soft-deleted items older than ${days} days`,
+    data: {
+      deletedCount: result.deletedCount,
+      olderThanDays: days,
+    },
+  });
+});
+
+// ===================
+
+// 6. Bulk Delete (Multiple Items)
+exports.bulkDeleteMenuItems = catchAsync(async (req, res, next) => {
+  const { ids } = req.body; // Array of IDs
+
+  if (!ids || !Array.isArray(ids) || ids.length === 0) {
+    return next(new AppError("Please provide an array of menu item IDs", 400));
+  }
+
+  // Validate all IDs
+  const invalidIds = ids.filter((id) => !mongoose.Types.ObjectId.isValid(id));
+  if (invalidIds.length > 0) {
+    return next(new AppError(`Invalid IDs: ${invalidIds.join(", ")}`, 400));
+  }
+
+  // Delete all matching items
+  const result = await MenuItem.deleteMany({ _id: { $in: ids } });
+
+  if (result.deletedCount === 0) {
+    return next(new AppError("No menu items found with the provided IDs", 404));
+  }
+
+  res.status(200).json({
+    status: "success",
+    message: `${result.deletedCount} menu item(s) permanently deleted`,
+    data: {
+      deletedCount: result.deletedCount,
+      deletedIds: ids,
+    },
+  });
+});
+
+// 7. Soft Bulk Delete
+exports.bulkSoftDeleteMenuItems = catchAsync(async (req, res, next) => {
+  const { ids } = req.body;
+
+  if (!ids || !Array.isArray(ids) || ids.length === 0) {
+    return next(new AppError("Please provide an array of menu item IDs", 400));
+  }
+
+  // Validate IDs
+  const invalidIds = ids.filter((id) => !mongoose.Types.ObjectId.isValid(id));
+  if (invalidIds.length > 0) {
+    return next(new AppError(`Invalid IDs: ${invalidIds.join(", ")}`, 400));
+  }
+
+  // Soft delete all matching items
+  const result = await MenuItem.updateMany(
+    { _id: { $in: ids } },
+    {
+      isAvailable: false,
+      softDeleted: true,
+      softDeletedAt: new Date(),
+    },
+  );
+
+  res.status(200).json({
+    status: "success",
+    message: `${result.modifiedCount} menu item(s) deactivated`,
+    data: {
+      modifiedCount: result.modifiedCount,
+      deactivatedIds: ids,
+    },
+  });
+});
+
+// 8. Delete All Items for a Hotel (Admin only)
+exports.deleteAllHotelItems = catchAsync(async (req, res, next) => {
+  const { hotelId } = req.params;
+
+  if (!mongoose.Types.ObjectId.isValid(hotelId)) {
+    return next(new AppError("Invalid hotel ID", 400));
+  }
+
+  const result = await MenuItem.deleteMany({ hotelId });
+
+  res.status(200).json({
+    status: "success",
+    message: `Deleted ${result.deletedCount} menu items for hotel ${hotelId}`,
+    data: {
+      deletedCount: result.deletedCount,
+      hotelId,
+    },
+  });
+});
+
+// 9. Clean Up Old Soft Deleted Items (Permanently delete after X days)
+exports.cleanupSoftDeletedItems = catchAsync(async (req, res, next) => {
+  const { days = 30 } = req.query; // Default: delete after 30 days
+
+  const cutoffDate = new Date();
+  cutoffDate.setDate(cutoffDate.getDate() - days);
+
+  const result = await MenuItem.deleteMany({
+    softDeleted: true,
+    softDeletedAt: { $lt: cutoffDate },
+  });
+
+  res.status(200).json({
+    status: "success",
+    message: `Permanently deleted ${result.deletedCount} soft-deleted items older than ${days} days`,
+    data: {
+      deletedCount: result.deletedCount,
+      olderThanDays: days,
+    },
+  });
 });

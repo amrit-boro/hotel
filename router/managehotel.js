@@ -4,10 +4,6 @@ const hotelController = require("../controller/hotelController");
 
 const router = express.Router();
 
-router.post(
-  "/Hotelcreation",
-  authController.protect,
-  hotelController.createHotel
-);
+router.route("/").post(hotelController.registerHotel);
 
 module.exports = router;

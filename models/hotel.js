@@ -1,51 +1,102 @@
 const mongoose = require("mongoose");
-const bcrypt = require("bcryptjs");
 
 const HotelSchema = new mongoose.Schema(
   {
     ownerId: {
       type: mongoose.Schema.Types.ObjectId,
       ref: "User",
-      required: true,
+      required: [true, "Owner ID is required"],
+      index: true,
     },
-    name: { type: String, required: [true, "Hotel name is required"] },
-    location: { type: String, trim: true },
-    logoUrl: { type: String, trim: true, default: "123img.jpg" },
 
-    // --- SAAS / BUSINESS CONTROL ---
-    // If they stop paying you, set this to false to disable their QR codes
-    isActive: { type: Boolean, default: true },
+    name: {
+      type: String,
+      required: [true, "Hotel name is required"],
+      trim: true,
+      index: true,
+    },
+
+    location: {
+      type: String,
+      trim: true,
+      default: "",
+    },
+
+    logoUrl: {
+      type: String,
+      trim: true,
+      default: "",
+    },
+
+    openingTime: {
+      type: String,
+      default: "10:00",
+    },
+
+    closingTime: {
+      type: String,
+      default: "22:00",
+    },
+
+    isActive: {
+      type: Boolean,
+      default: true,
+      index: true,
+    },
+
     subscriptionPlan: {
       type: String,
       enum: ["free_trial", "basic", "premium"],
       default: "free_trial",
+      index: true,
     },
-    subscriptionExpiresAt: Date,
-    // Soft Delete (better than removing data permanently)
+
+    subscriptionExpiresAt: {
+      type: Date,
+      // required: false,  // Not required - will be auto-set by pre-save
+      index: true,
+    },
+
     isDeleted: {
       type: Boolean,
       default: false,
+      select: false,
+      index: true,
+    },
+
+    deletedAt: {
+      type: Date,
       select: false,
     },
   },
   {
     timestamps: true,
+    toJSON: { virtuals: true },
+    toObject: { virtuals: true },
   },
 );
 
-// ===============================================================================
-// pre
-// ===============================================================================
-HotelSchema.pre("save", async function () {
-  // 1. If password wasn't modified, exit the function immediately.
-  // (In an async function, 'return' acts like 'next()')
-  if (!this.isModified("kitchenPassword")) return;
+// Pre-save middleware to auto-set subscription expiry
+HotelSchema.pre("save", function () {
+  if (!this.subscriptionExpiresAt && this.subscriptionPlan === "free_trial") {
+    const expiryDate = new Date();
+    expiryDate.setDate(expiryDate.getDate() + 30);
+    this.subscriptionExpiresAt = expiryDate;
+  }
+});
 
-  // 2. Hash the password with cost of 12
-  this.kitchenPassword = await bcrypt.hash(this.kitchenPassword, 12);
+// Virtual for subscription status
+HotelSchema.virtual("subscriptionStatus").get(function () {
+  const now = new Date();
+  if (!this.subscriptionExpiresAt) return "active";
+  return this.subscriptionExpiresAt > now ? "active" : "expired";
+});
 
-  // No need to call next()!
-  // When this function finishes successfully, Mongoose moves on.
+HotelSchema.virtual("daysRemaining").get(function () {
+  const now = new Date();
+  if (!this.subscriptionExpiresAt || this.subscriptionExpiresAt < now) return 0;
+  const diffTime = Math.abs(this.subscriptionExpiresAt - now);
+  return Math.ceil(diffTime / (1000 * 60 * 60 * 24));
 });
 
 const Hotel = mongoose.model("Hotel", HotelSchema);

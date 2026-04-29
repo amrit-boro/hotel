@@ -55,6 +55,15 @@ const MenuItemSchema = new mongoose.Schema(
       average: { type: Number, default: 0, min: 0, max: 5 },
       count: { type: Number, default: 0 },
     },
+    softDeleted: {
+      type: Boolean,
+      default: false,
+      index: true,
+    },
+    softDeletedAt: {
+      type: Date,
+      default: null,
+    },
   },
   {
     timestamps: true,
