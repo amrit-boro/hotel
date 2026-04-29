@@ -29,6 +29,7 @@ const whitelist = process.env.ALLOWED_ORIGINS
 
 // 2. INITIALIZE APP & SERVER
 const app = express();
+app.set("query parser", "extended");
 const server = http.createServer(app);
 
 // REMOVED: Socket.IO initialization

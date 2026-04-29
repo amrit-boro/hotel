@@ -9,9 +9,6 @@ router.get("/", hotelMenuController.allItem);
 
 // Item details ===================
 router.get("/item/:itemId", hotelMenuController.getItem);
-
-// ======================================================
-// router.use(authController.protect);
 // CREATE MENU ==============
 router.post(
   "/create",
@@ -20,11 +17,19 @@ router.post(
 );
 
 // ======================================================
+// router.use(authController.protect);
+
+// ======================================================
 // 2. UPDATE ITEM (With Image)
 router.patch(
   "/update/:id",
   uploadImage.single("image"),
   hotelMenuController.updateMenu,
+);
+
+router.patch(
+  "/update/choic-availability/:id",
+  hotelMenuController.updateChoiceAvailability,
 );
 
 router.delete("/delete/:id", hotelMenuController.deleteMenu);

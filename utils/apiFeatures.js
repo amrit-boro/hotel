@@ -6,7 +6,7 @@ class APIFeatures {
 
   // 1. Filtering (category, veg, hotelId, price range, etc.)
   filter() {
-    const queryObj = { ...this.queryString };
+    const queryObj = { ...this.queryString }; // Clone
 
     // Fields to exclude from filtering
     const excludedFields = ["page", "sort", "limit", "fields", "search"];
@@ -16,8 +16,7 @@ class APIFeatures {
     let queryStr = JSON.stringify(queryObj);
     queryStr = queryStr.replace(/\b(gte|gt|lte|lt)\b/g, (match) => `$${match}`);
 
-    let parsedQuery = JSON.parse(queryStr);
-
+    let parsedQuery = JSON.parse(queryStr); // Back to Object
     // Case-insensitive category
     if (parsedQuery.category) {
       parsedQuery.category = {
@@ -28,7 +27,7 @@ class APIFeatures {
 
     // Convert veg string → boolean
     if (parsedQuery.veg !== undefined) {
-      parsedQuery.veg = parsedQuery.veg === "true";
+      parsedQuery.veg = parsedQuery.veg === "true"; // if parsedQuery.veg is true then true === true : return true otherwise false
     }
 
     this.query = this.query.find(parsedQuery);

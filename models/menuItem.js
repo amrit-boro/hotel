@@ -30,7 +30,6 @@ const MenuItemSchema = new mongoose.Schema(
       index: true, // for filtering veg/non-veg items
     },
     price: { type: Number, required: true, min: 0 }, // Base Price
-    category: { type: String, required: true }, // e.g., "Starters"
     image: {
       url: { type: String, default: "" }, // For the Frontend (<img> src)
       publicId: { type: String, default: "" }, // For the Backend (Cloudinary Delete)
@@ -46,6 +45,7 @@ const MenuItemSchema = new mongoose.Schema(
           {
             name: String, // e.g., "Large", "Extra Cheese"
             priceMod: { type: Number, default: 0, min: 0 }, // Added cost
+            isAvailable: { type: Boolean, default: undefined, index: true },
           },
         ],
       },
@@ -60,6 +60,13 @@ const MenuItemSchema = new mongoose.Schema(
     timestamps: true,
   },
 );
+
+// Add after your schema definition
+// Create indexes for better query performance
+// MenuItemSchema.index({ hotelId: 1, isAvailable: 1 });
+// MenuItemSchema.index({ category: 1, isAvailable: 1 });
+// MenuItemSchema.index({ name: "text", description: "text" });
+// MenuItemSchema.index({ "options.choices.isAvailable": 1 });
 
 const MenuItem = mongoose.model("MenuItem", MenuItemSchema);
 module.exports = MenuItem;
