@@ -41,6 +41,7 @@ const MenuItemSchema = new mongoose.Schema(
       {
         name: String, // e.g., "Size", "Spiciness", "Add-ons"
         required: { type: Boolean, default: false },
+        isAvailable: { type: Boolean, default: true },
         choices: [
           {
             name: String, // e.g., "Large", "Extra Cheese"

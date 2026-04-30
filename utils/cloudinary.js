@@ -18,7 +18,7 @@ cloudinary.config({
 const imageStorage = new CloudinaryStorage({
   cloudinary: cloudinary,
   params: {
-    folder: "Hotel",
+    folder: (req) => `hotel/${req.params.hotelId}`,
     allowed_formats: ["jpeg", "jpg", "png", "webp"],
     transformation: [{ quality: "auto", fetch_format: "auto" }],
   },
@@ -28,15 +28,21 @@ const imageStorage = new CloudinaryStorage({
 const uploadImage = multer({
   storage: imageStorage,
   limits: { fileSize: 5 * 1024 * 1024 }, // 5MB limit
+  fileFilter: (req, file, cb) => {
+    if (!file.mimetype.startsWith("image")) {
+      return cb(new Error("only image allowed"), false);
+    }
+    cb(null, true);
+  },
 });
 
 // 4. Configure Storage
-const storage = new CloudinaryStorage({
-  cloudinary: cloudinary,
-  params: {
-    folder: "test_folder",
-    allowed_formats: ["jpg", "png", "jpeg"],
-  },
-});
+// const storage = new CloudinaryStorage({
+//   cloudinary: cloudinary,
+//   params: {
+//     folder: "test_folder",
+//     allowed_formats: ["jpg", "png", "jpeg"],
+//   },
+// });
 
 module.exports = { uploadImage, cloudinary };
