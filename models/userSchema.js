@@ -17,35 +17,31 @@ const UserSchema = new mongoose.Schema(
       trim: true,
       match: [/^\S+@\S+\.\S+$/, "Please enter a valid email"],
     },
-    phone: {
-      type: String,
-      required: [true, "Please provide your phone number"],
-      unique: true,
-      match: [/^[0-9]{10}$/, "Please provide a valid 10-digit phone number"],
-    },
     photo: String,
     role: {
       type: String,
       enum: ["superadmin", "owner"],
       default: "owner",
     },
+    googleId: { type: String },
     password: {
       type: String,
-      required: [true, "Please provide a password"],
-      minlength: 8,
+      required: function () {
+        return !this.googleId; // Only required for normal signup
+      },
       select: false, // Security: Never show password in output
     },
-    passwordConfirm: {
-      type: String,
-      required: [true, "Please confirm your password"],
-      validate: {
-        // This only works on CREATE and SAVE!!!
-        validator: function (el) {
-          return el === this.password;
-        },
-        message: "Passwords are not the same!",
-      },
-    },
+    // passwordConfirm: {
+    //   type: String,
+    //   required: [true, "Please confirm your password"],
+    //   validate: {
+    //     // This only works on CREATE and SAVE!!!
+    //     validator: function (el) {
+    //       return el === this.password;
+    //     },
+    //     message: "Passwords are not the same!",
+    //   },
+    // },
     passwordChangedAt: Date, // Tracks when password was last changed
     passwordResetToken: String, // Stores the Hashed Token
     passwordResetExpires: Date, // Stores the Expiry Time

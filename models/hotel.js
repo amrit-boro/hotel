@@ -15,6 +15,13 @@ const HotelSchema = new mongoose.Schema(
       trim: true,
       index: true,
     },
+    phone: {
+      type: String,
+      required: [true, "Please provide phone number"],
+      unique: true,
+      sparse: true, // IMPORTANT to avoid unique conflicts when null
+      match: [/^[0-9]{10}$/, "Please provide a valid 10-digit phone number"],
+    },
 
     location: {
       type: String,

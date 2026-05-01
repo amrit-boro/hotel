@@ -52,7 +52,7 @@ router.patch(
 
 // // Regular CRUD
 
-router.route("/").get(hotelMenuController.allItem);
+router.route("/").get(authController.protect, hotelMenuController.allItem);
 
 router
   .route("/:hotelId/create")

@@ -14,56 +14,83 @@ const signToken = (id) => {
 };
 
 // --- 2. HELPER: Send Cookie & Response ---
-const createSendToken = (user, statusCode, res) => {
+// const createSendToken = (user, statusCode, res) => {
+//   const token = signToken(user._id);
+
+//   // Define Cookie Options
+//   const cookieOptions = {
+//     expires: new Date(
+//       Date.now() + process.env.JWT_COOKIE_EXPIRES_IN * 24 * 60 * 60 * 1000, //Note: JWT_COOKIE_EXPIRES_IN is just a number (90), because inside the code we multiply it to turn it into milliseconds)
+//     ), // Convert days to milliseconds
+//     httpOnly: true, // IMPORTANT: Prevents browser JS from reading the cookie
+//   };
+
+//   // Only send over HTTPS in production
+//   if (process.env.NODE_ENV === "production") {
+//     cookieOptions.secure = true;
+//     cookieOptions.sameSite = "None"; // Required for cross-site cookies in prod
+//   }
+
+//   // ✅ SEND THE COOKIE
+//   res.cookie("jwt", token, cookieOptions);
+
+//   // Remove password from output (Security)
+//   user.password = undefined;
+
+//   res.status(statusCode).json({
+//     status: "success",
+//     token, // We send it in JSON too, just in case specific clients need it
+//     data: {
+//       user,
+//     },
+//   });
+// };
+
+const createSendToken = (user, statusCode, res, redirectUrl) => {
   const token = signToken(user._id);
 
-  // Define Cookie Options
   const cookieOptions = {
     expires: new Date(
-      Date.now() + process.env.JWT_COOKIE_EXPIRES_IN * 24 * 60 * 60 * 1000 //Note: JWT_COOKIE_EXPIRES_IN is just a number (90), because inside the code we multiply it to turn it into milliseconds)
-    ), // Convert days to milliseconds
-    httpOnly: true, // IMPORTANT: Prevents browser JS from reading the cookie
+      Date.now() + process.env.JWT_COOKIE_EXPIRES_IN * 24 * 60 * 60 * 1000,
+    ),
+    httpOnly: true,
+    sameSite: "Lax", // important for redirect
   };
 
-  // Only send over HTTPS in production
-  if (process.env.NODE_ENV === "production") {
-    cookieOptions.secure = true;
-    cookieOptions.sameSite = "None"; // Required for cross-site cookies in prod
-  }
-
-  // ✅ SEND THE COOKIE
   res.cookie("jwt", token, cookieOptions);
 
-  // Remove password from output (Security)
   user.password = undefined;
 
+  // 🔥 OAuth flow → redirect
+  if (redirectUrl) {
+    return res.redirect(redirectUrl);
+  }
+
+  // normal API response
   res.status(statusCode).json({
     status: "success",
-    token, // We send it in JSON too, just in case specific clients need it
-    data: {
-      user,
-    },
+    token,
+    data: { user },
   });
 };
+
 exports.protect = catchAsync(async (req, res, next) => {
   // 1) Getting token and checking if it's there
   let token;
 
-  // A. Check Authorization Header (For Mobile Apps / Postman)
   if (
     req.headers.authorization &&
     req.headers.authorization.startsWith("Bearer")
   ) {
     token = req.headers.authorization.split(" ")[1];
-  }
-  // B. Check Cookies (For Web Dashboard / Browser)
-  else if (req.cookies.jwt) {
+  } else if (req.cookies.jwt) {
     token = req.cookies.jwt;
   }
 
-  if (!token) {
+  // ✅ ADD THIS — block the logout sentinel before jwt.verify runs
+  if (!token || token === "loggedout") {
     return next(
-      new AppError("You are not logged in! Please log in to get access.", 401)
+      new AppError("You are not logged in! Please log in to get access.", 401),
     );
   }
 
@@ -75,7 +102,7 @@ exports.protect = catchAsync(async (req, res, next) => {
   const currentUser = await User.findById(decoded.id);
   if (!currentUser) {
     return next(
-      new AppError("The user belonging to this token no longer exists.", 401) // <--- ADDED 401
+      new AppError("The user belonging to this token no longer exists.", 401), // <--- ADDED 401
     );
   }
 
@@ -83,7 +110,7 @@ exports.protect = catchAsync(async (req, res, next) => {
   // We pass the 'iat' (issued at) timestamp from the token
   if (currentUser.changedPasswordAfter(decoded.iat)) {
     return next(
-      new AppError("User recently changed password! Please log in again.", 401)
+      new AppError("User recently changed password! Please log in again.", 401),
     );
   }
 
@@ -96,22 +123,24 @@ exports.protect = catchAsync(async (req, res, next) => {
 // const generateToken = (payload) => {};
 
 exports.register = catchAsync(async (req, res, next) => {
-  // 1. Create the new user
-  // We explicitly pick fields to prevent "Mass Assignment" attacks
-  // (e.g., stopping a user from passing role: "admin")
   const newUser = await User.create({
     name: req.body.name,
     email: req.body.email,
     phone: req.body.phone,
     password: req.body.password,
-    passwordConfirm: req.body.passwordConfirm,
-    role: "owner", // 👈 IMPORTANT: Since this is the SaaS Dashboard, force role to Owner
+    // passwordConfirm: req.body.passwordConfirm,
+    role: "owner",
   });
 
   // 2. Log them in immediately (Send Cookie & Token)
   // We use 201 for "Created"
   createSendToken(newUser, 201, res);
 });
+
+// Google callback
+exports.googleCallback = (req, res) => {
+  createSendToken(req.user, 200, res, "http://localhost:5173/welcome");
+};
 // --- 3. LOGIN CONTROLLER ---
 exports.login = catchAsync(async (req, res, next) => {
   const { email, password } = req.body;
@@ -131,6 +160,19 @@ exports.login = catchAsync(async (req, res, next) => {
   // 3) If everything ok, send token via Cookie
   createSendToken(user, 200, res);
 });
+
+exports.logout = (req, res) => {
+  // We send a cookie with the same name but set its expiration to a date in the past
+  res.cookie("jwt", "loggedout", {
+    httpOnly: true,
+    maxAge: 0,
+  });
+
+  res.status(200).json({
+    status: "success",
+    message: "User logged out successfully",
+  });
+};
 
 // A. FORGOT PASSWORD (User requests link)
 exports.forgotPassword = catchAsync(async (req, res, next) => {
@@ -171,7 +213,7 @@ exports.forgotPassword = catchAsync(async (req, res, next) => {
 
     return next(
       new AppError("There was an error sending the email. Try again later!"),
-      500
+      500,
     );
   }
 });
@@ -212,3 +254,21 @@ exports.resetPassword = catchAsync(async (req, res, next) => {
   // 4. Log the user in (Send new cookie)
   createSendToken(user, 200, res);
 });
+
+// controllers/authController.js
+
+exports.getMe = async (req, res) => {
+  const token = req.cookies.jwt;
+  if (!token) {
+    return res.status(401).json({ status: "fail", message: "Not logged in" });
+  }
+
+  const decoded = jwt.verify(token, process.env.JWT_SECRET);
+
+  const user = await User.findById(decoded.id).select("-password");
+
+  res.status(200).json({
+    status: "success",
+    data: { user },
+  });
+};
