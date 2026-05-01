@@ -2,11 +2,14 @@ const express = require("express");
 const { uploadImage, cloudinary } = require("../utils/cloudinary");
 const hotelMenuController = require("../controller/hotelmenuController");
 const authController = require("../controller/authController");
-const { checkSubscription } = require("../middlewares/subcriptionMiddleware");
 const router = express.Router();
 
 // All routes require authentication and active subscription
-// router.use(checkSubscription);
+router.use(
+  authController.protect,
+  authController.restrictTo("owner"),
+  authController.checkSubscription,
+);
 
 // Delete routes
 router.delete("/:id", hotelMenuController.deleteMenuItem);

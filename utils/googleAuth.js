@@ -19,7 +19,12 @@ passport.use(
 
         // 2. If not, create user (NO password)
         if (!user) {
-          return done(null, false, { message: "User not registered" });
+          user = await User.create({
+            name,
+            email,
+            googleId: profile.id,
+            role: "user",
+          });
         }
 
         // 3. If exists but no googleId → link account

@@ -210,11 +210,10 @@ exports.hotelMenu = catchAsync(async (req, res, next) => {
 // CREATE MENU
 // ==========================================================
 exports.createMenu = catchAsync(async (req, res, next) => {
-  const { hotelId, name, category, description, veg, price, isAvailable } =
-    req.body;
+  const { name, category, description, veg, price, isAvailable } = req.body;
 
   let { options } = req.body;
-
+  const hotelId = req.user?.hotelId;
   // 1. Validate required fields
   if (!hotelId || !name || !category || price === undefined) {
     return next(new AppError("Missing required fields", 400));

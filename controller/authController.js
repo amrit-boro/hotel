@@ -1,4 +1,6 @@
 const User = require("../models/userSchema");
+const Hotel = require("../models/hotel");
+
 const { promisify } = require("util");
 const sendEmail = require("../utils/email");
 const crypto = require("crypto");
@@ -114,8 +116,16 @@ exports.protect = catchAsync(async (req, res, next) => {
     );
   }
 
+  // Attach the hotel that belongs to this owner
+  const hotel = await Hotel.findOne({
+    ownerId: currentUser._id,
+    isDeleted: { $ne: true },
+  });
+
   // GRANT ACCESS TO PROTECTED ROUTE
   req.user = currentUser;
+  req.user.hotelId = hotel?._id ?? null; // safely attach, null if no hotel yet
+
   res.locals.user = currentUser; // Useful for server-side rendering (optional)
   next();
 });
@@ -126,10 +136,9 @@ exports.register = catchAsync(async (req, res, next) => {
   const newUser = await User.create({
     name: req.body.name,
     email: req.body.email,
-    phone: req.body.phone,
     password: req.body.password,
     // passwordConfirm: req.body.passwordConfirm,
-    role: "owner",
+    role: "user",
   });
 
   // 2. Log them in immediately (Send Cookie & Token)
@@ -172,6 +181,17 @@ exports.logout = (req, res) => {
     status: "success",
     message: "User logged out successfully",
   });
+};
+
+exports.restrictTo = (...roles) => {
+  return (req, res, next) => {
+    if (!roles.includes(req.user.role)) {
+      return next(
+        new AppError("You do not have permission to perform this action", 403),
+      );
+    }
+    next();
+  };
 };
 
 // A. FORGOT PASSWORD (User requests link)
@@ -272,3 +292,71 @@ exports.getMe = async (req, res) => {
     data: { user },
   });
 };
+
+// SubsScription
+
+// authController.js  (add this alongside your protect middleware)
+
+exports.checkSubscription = catchAsync(async (req, res, next) => {
+  // 1) Read-only methods always pass through
+  const READ_ONLY_METHODS = ["GET", "HEAD", "OPTIONS"];
+  if (READ_ONLY_METHODS.includes(req.method)) return next();
+
+  // 2) Resolve hotelId from request
+  const hotelId = req.user.hotelId;
+
+  if (!hotelId) {
+    return next(new AppError("No hotel associated with this request.", 400));
+  }
+
+  // 3) Fetch hotel — NOT lean() so virtuals (subscriptionStatus, daysRemaining) work
+  const hotel = await Hotel.findOne({
+    _id: hotelId,
+    isDeleted: false, // respect soft-delete
+  }).select("+isDeleted subscriptionPlan subscriptionExpiresAt ownerId");
+
+  if (!hotel) {
+    return next(new AppError("Hotel not found.", 404));
+  }
+
+  // 4) Ownership guard — your schema uses ownerId, not owner
+  if (hotel.ownerId.toString() !== req.user._id.toString()) {
+    return next(
+      new AppError("You do not have permission to modify this hotel.", 403),
+    );
+  }
+
+  // 5) Use the virtual to check subscription status
+  //    virtual returns "active" | "expired"  (see your schema)
+  if (hotel.subscriptionStatus === "expired") {
+    return next(
+      new AppError(
+        `Your ${formatPlan(hotel.subscriptionPlan)} has expired. ` +
+          "Please renew your subscription to continue.",
+        403,
+      ),
+    );
+  }
+
+  // 6) Warn if subscription is expiring soon (≤ 5 days) but still let request through
+  //    Frontend can read this header and show a banner
+  console.log(hotel.daysRemaining);
+  if (hotel.daysRemaining <= 5 && hotel.daysRemaining > 0) {
+    res.set(
+      "X-Subscription-Warning",
+      `Your subscription expires in ${hotel.daysRemaining} day(s).`,
+    );
+  }
+
+  // 7) Attach hotel to req — downstream controllers won't need to re-fetch
+  req.hotel = hotel;
+  next();
+});
+
+// Helper: turns "free_trial" → "Free Trial", "premium" → "Premium"
+function formatPlan(plan) {
+  return plan
+    .split("_")
+    .map((w) => w.charAt(0).toUpperCase() + w.slice(1))
+    .join(" ");
+}

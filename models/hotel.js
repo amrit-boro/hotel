@@ -92,6 +92,13 @@ HotelSchema.pre("save", function () {
   }
 });
 
+// HotelSchema.pre("save", function () {
+//   if (!this.subscriptionExpiresAt && this.subscriptionPlan === "free_trial") {
+//     const expiryDate = new Date(Date.now() + 1000); // 1 sec for testing
+//     this.subscriptionExpiresAt = expiryDate;
+//   }
+// });
+
 // Virtual for subscription status
 HotelSchema.virtual("subscriptionStatus").get(function () {
   const now = new Date();
