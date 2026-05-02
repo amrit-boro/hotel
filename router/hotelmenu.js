@@ -1,6 +1,8 @@
 const express = require("express");
 const { uploadImage, cloudinary } = require("../utils/cloudinary");
 const hotelMenuController = require("../controller/hotelmenuController");
+const hotelMenuController_v2 = require("../controller/hotelmenuController_v2");
+
 const authController = require("../controller/authController");
 const router = express.Router();
 
@@ -12,24 +14,9 @@ router.use(
 );
 
 // Delete routes
-router.delete("/:id", hotelMenuController.deleteMenuItem);
-router.patch("/:id/soft-delete", hotelMenuController.softDeleteMenuItem);
-router.patch("/:id/restore", hotelMenuController.restoreMenuItem);
-router.patch("/:id/:optionIndex", hotelMenuController.softDeleteOption);
-router.patch(
-  "/:id/:optionIndex/restore",
-  hotelMenuController.restoreSoftDeleteOption,
-);
-
-router.delete("/:id/option/:optionIndex", hotelMenuController.deleteOption); // Delete a Specific Option
-router.delete(
-  "/:id/option/:optionIndex/choice/:choiceIndex",
-  hotelMenuController.deleteChoice,
-);
-
-// Bulk operations
-router.post("/bulk-delete", hotelMenuController.bulkDeleteMenuItems);
-router.post("/bulk-soft-delete", hotelMenuController.bulkSoftDeleteMenuItems);
+router.delete("/:id", hotelMenuController.deleteMenuItem); // Hard
+// router.patch("/:id/soft-delete", hotelMenuController.softDeleteMenuItem); v1
+// router.patch("/:id/restore", hotelMenuController.restoreMenuItem);  v1
 
 // // Hotel level operations
 router.delete("/hotel/:hotelId/all", hotelMenuController.deleteAllHotelItems);
@@ -57,9 +44,14 @@ router.patch(
 
 router.route("/").get(authController.protect, hotelMenuController.allItem);
 
+// router
+//   .route("/:hotelId/create")
+// .post(uploadImage.single("image"), hotelMenuController.createMenu);
+
+//v2
 router
   .route("/:hotelId/create")
-  .post(uploadImage.single("image"), hotelMenuController.createMenu);
+  .post(uploadImage.single("image"), hotelMenuController_v2.createMenu);
 
 router.get("/:itemId", hotelMenuController.getItem);
 

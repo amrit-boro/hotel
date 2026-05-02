@@ -14,18 +14,13 @@ const hpp = require("hpp");
 // --- ROUTE IMPORTS ---
 const authrouter = require("./router/auth");
 const hotelMenu = require("./router/hotelmenu");
-const order = require("./router/order");
+const hotelMenu_v2 = require("./router/hotelmenu_v2");
+
 const manageHotel = require("./router/managehotel");
-const manageHotelstaff = require("./router/Hotelstaff");
 
 // --- UTILS ---
 const globalErrorHandler = require("./controller/errorController");
 const AppError = require("./utils/appError");
-
-// 1. SETUP WHITELIST
-const whitelist = process.env.ALLOWED_ORIGINS
-  ? process.env.ALLOWED_ORIGINS.split(",")
-  : [];
 
 // 2. INITIALIZE APP & SERVER
 const app = express();
@@ -71,22 +66,13 @@ app.use(cookieParser());
 // F. Prevent Parameter Pollution
 // app.use(hpp());
 
-// ==================================================
-
-// REMOVED: req.io injection middleware
-
-// REMOVED: socket connection logic
-
 // 7. ROUTES
-app.use((req, res, next) => {
-  console.log("Hello from the server");
-  next();
-});
 
 app.use("/api/v1/auth", authrouter);
 app.use("/api/v1/hotel", manageHotel);
 // app.use("/api/hotelStaff", manageHotelstaff);
 app.use("/api/v1/menu", hotelMenu);
+app.use("/api/v2/menu", hotelMenu_v2);
 // app.use("/api/orders", order);
 
 // 8. ERROR HANDLER

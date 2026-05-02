@@ -340,7 +340,6 @@ exports.checkSubscription = catchAsync(async (req, res, next) => {
 
   // 6) Warn if subscription is expiring soon (≤ 5 days) but still let request through
   //    Frontend can read this header and show a banner
-  console.log(hotel.daysRemaining);
   if (hotel.daysRemaining <= 5 && hotel.daysRemaining > 0) {
     res.set(
       "X-Subscription-Warning",
