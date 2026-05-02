@@ -94,7 +94,6 @@ const MenuItemSchema = new mongoose.Schema(
       required: true,
       trim: true,
       // adjust values as per your app
-      enum: ["starter", "main", "dessert", "drink", "mutton"],
       index: true,
     },
 

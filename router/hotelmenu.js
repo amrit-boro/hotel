@@ -50,7 +50,7 @@ router.route("/").get(authController.protect, hotelMenuController.allItem);
 
 //v2
 router
-  .route("/:hotelId/create")
+  .route("/:id/create")
   .post(uploadImage.single("image"), hotelMenuController_v2.createMenu);
 
 router.get("/:itemId", hotelMenuController.getItem);

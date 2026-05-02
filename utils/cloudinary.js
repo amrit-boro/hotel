@@ -18,7 +18,7 @@ cloudinary.config({
 const imageStorage = new CloudinaryStorage({
   cloudinary: cloudinary,
   params: {
-    folder: (req) => `hotel/${req.params.hotelId}`,
+    folder: (req) => `hotel/${req.params.id}`,
     allowed_formats: ["jpeg", "jpg", "png", "webp"],
     transformation: [{ quality: "auto", fetch_format: "auto" }],
   },

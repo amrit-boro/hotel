@@ -1,11 +1,7 @@
 const catchAsync = require("../utils/catchAsync");
 const MenuItem = require("../models/menuItem");
 const mongoose = require("mongoose"); // Import mongoose for ID validation
-const menuPermission = require("../utils/checkMenuPermision");
-const Hotel = require("../models/hotel");
-const HotelStaff = require("../models/hotelStuff");
 const AppError = require("../utils/appError");
-const APIFeatures = require("../utils/apiFeatures");
 
 /**
  * Helper function to find menu item by ID with validation
@@ -84,85 +80,105 @@ const validateChoiceIndex = (
 exports.getAvailableMenuItems = catchAsync(async (req, res) => {
   const { hotelId } = req.params;
   const { category, veg } = req.query;
-  console.log(req.query);
 
-  // Build query for menu level
+  // Build query
   const query = {
     hotelId,
-    isAvailable: true, // Only available menus
-    softDeleted: false, // Only non-deleted menus
+    isAvailable: true,
+    softDeleted: false,
   };
 
   if (category) query.category = category;
   if (veg) query.veg = veg === "true";
 
-  // Fetch menu items
+  // Fetch data
   const menuItems = await MenuItem.find(query);
+  // Transform response
+  const formattedMenu = menuItems.map((menu) => {
+    const menuObj = menu.toObject(); // menu still documet, converts mongoose document to -> plain js objects
 
-  // Filter items, options, and choices at all nested levels
-  const filteredMenuItems = menuItems.map((menu) => {
-    const menuObj = menu.toObject();
+    // Filter items
+    const items = (menuObj.items || [])
+      .filter((item) => item.isAvailable === true && item.softDeleted === false)
+      .map((item) => {
+        // Filter options
+        const options = (item.options || [])
+          .filter((option) => option.isAvailable === true)
+          .map((option) => {
+            // Filter choices
+            const choices = (option.choices || [])
+              .filter((choice) => choice.isAvailable === true)
+              .map((choice) => ({
+                name: choice.name,
+                priceMod: choice.priceMod,
+              }));
 
-    // Filter items: only available and not soft deleted
-    const availableItems = menuObj.items.filter(
-      (item) => item.isAvailable === true && item.softDeleted === false,
-    );
+            return {
+              name: option.name,
+              required: option.required,
+              choices,
+            };
+          });
 
-    // Further filter options and choices for each item
-    const filteredItems = availableItems.map((item) => {
-      // Filter options: only available options
-      const availableOptions =
-        item.options?.filter((option) => option.isAvailable === true) || [];
-
-      // Filter choices within each option: only available choices
-      const filteredOptions = availableOptions.map((option) => ({
-        ...option,
-        choices:
-          option.choices?.filter((choice) => choice.isAvailable === true) || [],
-      }));
-
-      return {
-        ...item,
-        options: filteredOptions,
-      };
-    });
+        return {
+          name: item.name,
+          price: item.price,
+          desc: item.desc,
+          rating: item.rating,
+          itemImg: item.itemImg?.url
+            ? {
+                url: item.itemImg.url,
+              }
+            : undefined,
+          options,
+        };
+      });
 
     return {
-      ...menuObj,
-      items: filteredItems,
+      category: menuObj.category,
+      veg: menuObj.veg,
+      img: menuObj.image?.url,
+      items,
     };
   });
 
-  // Only return menu categories that have at least one available item
-  const nonEmptyMenuItems = filteredMenuItems.filter(
-    (menu) => menu.items.length > 0,
+  // Remove empty menus
+  const finalData = formattedMenu.filter(
+    (menu) => menu.items && menu.items.length > 0,
   );
 
   res.status(200).json({
     success: true,
-    count: nonEmptyMenuItems.length,
-    data: nonEmptyMenuItems,
+    count: finalData.length,
+    data: finalData,
   });
 });
-
 /**
  * 5) Create a complete menu with multiple items
  */
 exports.createMenu = catchAsync(async (req, res, next) => {
-  let { hotelId, category, veg, image, items, isAvailable } = req.body;
+  let { hotelId, category, veg, items, isAvailable } = req.body;
 
-  // Convert string booleans (FormData → string)
-  veg = veg === "true";
-  isAvailable = isAvailable === "false" ? false : true;
+  // --- Parse FormData primitives ---
+  veg = veg !== undefined ? veg === "true" : undefined;
+  isAvailable = isAvailable !== undefined ? isAvailable === "true" : true;
 
-  // Parse items (VERY IMPORTANT for FormData)
+  // --- Parse items JSON ---
   try {
     items = typeof items === "string" ? JSON.parse(items) : items;
   } catch (err) {
     return next(new AppError("Invalid items format (must be JSON)", 400));
   }
 
-  // Validate required fields
+  // --- Image (menu level) ---
+  const image = req.file
+    ? {
+        url: req.file.path || req.file.secure_url,
+        publicId: req.file.filename || req.file.public_id,
+      }
+    : { url: "", publicId: "" };
+
+  // --- Validation ---
   if (!hotelId) {
     return next(new AppError("Hotel ID is required", 400));
   }
@@ -171,124 +187,38 @@ exports.createMenu = catchAsync(async (req, res, next) => {
     return next(new AppError("Category is required", 400));
   }
 
-  if (veg === undefined || veg === null) {
+  if (veg === undefined) {
     return next(new AppError("Veg/Non-veg status is required", 400));
   }
 
-  if (!items || !Array.isArray(items) || items.length === 0) {
-    return next(new AppError("At least one menu item is required", 400));
-  }
-
-  // Validate items
-  for (let i = 0; i < items.length; i++) {
-    const item = items[i];
-
-    if (!item.name) {
-      return next(new AppError(`Item at index ${i} must have a name`, 400));
-    }
-
-    // Convert price if string
-    item.price = Number(item.price);
-
-    if (isNaN(item.price) || item.price < 0) {
-      return next(
-        new AppError(`Item at index ${i} must have a valid price`, 400),
-      );
-    }
-
-    if (item.desc && item.desc.length < 10) {
-      return next(
-        new AppError(
-          `Item at index ${i} description must be at least 10 characters`,
-          400,
-        ),
-      );
-    }
-
-    // Options
-    if (item.options && Array.isArray(item.options)) {
-      for (let j = 0; j < item.options.length; j++) {
-        const option = item.options[j];
-
-        if (!option.name) {
-          return next(
-            new AppError(
-              `Option at index ${j} for item ${i} must have a name`,
-              400,
-            ),
-          );
-        }
-
-        if (option.choices && Array.isArray(option.choices)) {
-          for (let k = 0; k < option.choices.length; k++) {
-            const choice = option.choices[k];
-
-            if (!choice.name) {
-              return next(
-                new AppError(
-                  `Choice at index ${k} for option ${j} in item ${i} must have a name`,
-                  400,
-                ),
-              );
-            }
-
-            // Convert priceMod if string
-            choice.priceMod = Number(choice.priceMod || 0);
-
-            if (isNaN(choice.priceMod) || choice.priceMod < 0) {
-              return next(
-                new AppError(`Invalid price modifier at choice ${k}`, 400),
-              );
-            }
-          }
-        }
-      }
-    }
-  }
-
-  // Prepare data
+  // --- Final Data ---
   const menuItemData = {
     hotelId,
     category,
     veg,
-    image: image || { url: "", publicId: "" },
+    image,
     isAvailable,
-    items: items.map((item) => ({
-      ...item,
-      softDeleted: false,
-      softDeletedAt: null,
-      isAvailable: item.isAvailable !== undefined ? item.isAvailable : true,
-      rating: item.rating || 0,
-      itemImg: item.itemImg || { url: "", publicId: "" },
-      options: (item.options || []).map((option) => ({
-        ...option,
-        isAvailable:
-          option.isAvailable !== undefined ? option.isAvailable : true,
-        choices: (option.choices || []).map((choice) => ({
-          ...choice,
-          isAvailable:
-            choice.isAvailable !== undefined ? choice.isAvailable : true,
-          priceMod: choice.priceMod || 0,
-        })),
-      })),
-    })),
-    ratings: {
-      average: 0,
-      count: 0,
-    },
-    softDeleted: false,
-    softDeletedAt: null,
   };
 
+  // --- Save ---
   const newMenu = await MenuItem.create(menuItemData);
+
+  const {
+    __v,
+    softDeleted,
+    softDeletedAt,
+    createdAt,
+    updatedAt,
+    _id,
+    id,
+    isAvailable: _isAvailable,
+    ...filteredData
+  } = newMenu.toObject();
 
   res.status(201).json({
     status: "success",
     message: "Menu created successfully",
-    data: {
-      menu: newMenu,
-      itemsCount: newMenu.items.length,
-    },
+    data: filteredData,
   });
 });
 /**

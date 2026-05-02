@@ -6,7 +6,7 @@ const authController = require("../controller/authController");
 const router = express.Router();
 
 // Protect all routes
-router.use(authController.protect);
+router.use(authController.protect, authController.restrictTo("owner"));
 
 /* =========================
    GET ROUTES
@@ -22,6 +22,9 @@ router.get(
 router.post(
   "/add-item/:id",
   uploadImage.single("image"),
+  (req, res, next) => {
+    console.log("file: ", req.file);
+  },
   hotelMenuController_v2.addNewItem,
 );
 

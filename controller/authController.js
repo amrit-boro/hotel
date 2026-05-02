@@ -8,6 +8,7 @@ const crypto = require("crypto");
 const jwt = require("jsonwebtoken");
 const catchAsync = require("../utils/catchAsync");
 const AppError = require("../utils/appError");
+const { decode } = require("punycode");
 
 const signToken = (id) => {
   return jwt.sign({ id }, process.env.JWT_SECRET, {
@@ -286,10 +287,14 @@ exports.getMe = async (req, res) => {
   const decoded = jwt.verify(token, process.env.JWT_SECRET);
 
   const user = await User.findById(decoded.id).select("-password");
+  const ownerId = decoded?.id;
+  const hotel = await Hotel.findOne({ ownerId }).select("_id").lean();
+
+  const hotelId = hotel?._id;
 
   res.status(200).json({
     status: "success",
-    data: { user },
+    data: { user, hotelId },
   });
 };
 
