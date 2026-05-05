@@ -1,739 +1,432 @@
 const catchAsync = require("../utils/catchAsync");
-const MenuItem = require("../models/menuItem");
+const Items = require("../models/item");
+const MenuCategory = require("../models/menuCategory");
+const MenuItem = require("../models/item");
 const mongoose = require("mongoose"); // Import mongoose for ID validation
 const AppError = require("../utils/appError");
 
-/**
- * Helper function to find menu item by ID with validation
- */
-const findMenuItemById = async (id, next) => {
-  if (!mongoose.Types.ObjectId.isValid(id)) {
-    return next(new AppError("Invalid menu item id", 400));
-  }
-
-  const menuItem = await MenuItem.findById(id);
-  if (!menuItem) {
-    return next(new AppError("Menu item not found", 404));
-  }
-
-  return menuItem;
-};
-
-/**
- * Helper function to validate item index
- */
-const validateItemIndex = (menuItem, itemIndex, next) => {
-  if (itemIndex < 0 || itemIndex >= menuItem.items.length) {
-    return next(new AppError("Invalid item index", 400));
-  }
-  return true;
-};
-
-/**
- * Helper function to validate option index
- */
-const validateOptionIndex = (menuItem, itemIndex, optionIndex, next) => {
-  if (
-    optionIndex < 0 ||
-    optionIndex >= menuItem.items[itemIndex].options.length
-  ) {
-    return next(new AppError("Invalid option index", 400));
-  }
-  return true;
-};
-
-/**
- * Helper function to validate choice index
- */
-const validateChoiceIndex = (
-  menuItem,
-  itemIndex,
-  optionIndex,
-  choiceIndex,
-  next,
-) => {
-  if (
-    choiceIndex < 0 ||
-    choiceIndex >= menuItem.items[itemIndex].options[optionIndex].choices.length
-  ) {
-    return next(new AppError("Invalid choice index", 400));
-  }
-  return true;
-};
-
-// Get all menu items for a hotel (with filtering)
-// exports.getMenuItems = catchAsync(async (req, res) => {
-//   const { hotelId } = req.params;
-//   console.log(hotelId);
-//   const { category, veg, isAvailable, softDeleted } = req.query;
-
-//   const query = { hotelId, softDeleted: softDeleted === "true" };
-
-//   if (category) query.category = category;
-//   if (veg) query.veg = veg === "true";
-//   if (isAvailable) query.isAvailable = isAvailable === "true";
-
-//   const menuItems = await MenuItem.find(query);
-//   res.status(200).json({ success: true, data: menuItems });
-// });
-
-exports.getAvailableMenuItems = catchAsync(async (req, res) => {
+// Get menu
+exports.menuDetails = catchAsync(async (req, res, next) => {
+  console.log("hello from the menuDetils");
   const { hotelId } = req.params;
-  const { category, veg } = req.query;
 
-  // Build query
-  const query = {
+  // Validate hotelId
+  if (!mongoose.Types.ObjectId.isValid(hotelId)) {
+    return next(new AppError("Invalid hotelId"));
+  }
+
+  // 2) fetch categories
+  const categories = await MenuCategory.find({
     hotelId,
     isAvailable: true,
     softDeleted: false,
-  };
+  })
+    .select("_id name veg")
+    .lean();
 
-  if (category) query.category = category;
-  if (veg) query.veg = veg === "true";
+  // 3 fetch Item
+  const items = await MenuItem.find({
+    hotelId,
+    isAvailable: true,
+    softDeleted: true,
+  })
+    .select("categoryId name price desc rating itemImg options")
+    .lean();
 
-  // Fetch data
-  const menuItems = await MenuItem.find(query);
-  // Transform response
-  const formattedMenu = menuItems.map((menu) => {
-    const menuObj = menu.toObject(); // menu still documet, converts mongoose document to -> plain js objects
+  const itemsMap = {};
+  for (const item of items) {
+    const key = item.categoryId.toString();
+    if (!itemsMap[key]) {
+      itemsMap[key] = [];
+    }
 
-    // Filter items
-    const items = (menuObj.items || [])
-      .filter((item) => item.isAvailable === true && item.softDeleted === false)
-      .map((item) => {
-        // Filter options
-        const options = (item.options || [])
-          .filter((option) => option.isAvailable === true)
-          .map((option) => {
-            // Filter choices
-            const choices = (option.choices || [])
-              .filter((choice) => choice.isAvailable === true)
-              .map((choice) => ({
-                name: choice.name,
-                priceMod: choice.priceMod,
-              }));
+    itemsMap[key].push(item);
+  }
 
-            return {
-              name: option.name,
-              required: option.required,
-              choices,
-            };
-          });
-
-        return {
-          name: item.name,
-          price: item.price,
-          desc: item.desc,
-          rating: item.rating,
-          itemImg: item.itemImg?.url
-            ? {
-                url: item.itemImg.url,
-              }
-            : undefined,
-          options,
-        };
-      });
-
-    return {
-      category: menuObj.category,
-      veg: menuObj.veg,
-      img: menuObj.image?.url,
-      items,
-    };
-  });
-
-  // Remove empty menus
-  const finalData = formattedMenu.filter(
-    (menu) => menu.items && menu.items.length > 0,
-  );
+  const result = categories.map((cat) => ({
+    _id: cat._id,
+    name: cat.name,
+    veg: cat.veg,
+    items: itemsMap[cat._id.toString()] || [],
+  }));
 
   res.status(200).json({
-    success: true,
-    count: finalData.length,
-    data: finalData,
+    status: "success",
+    results: result.length,
+    data: result,
   });
 });
+
 /**
  * 5) Create a complete menu with multiple items
  */
-exports.createMenu = catchAsync(async (req, res, next) => {
-  let { hotelId, category, veg, items, isAvailable } = req.body;
+exports.createCategory = catchAsync(async (req, res, next) => {
+  const { hotelId, categoryName, veg, image, isAvailable } = req.body;
 
-  // --- Parse FormData primitives ---
-  veg = veg !== undefined ? veg === "true" : undefined;
-  isAvailable = isAvailable !== undefined ? isAvailable === "true" : true;
-
-  // --- Parse items JSON ---
-  try {
-    items = typeof items === "string" ? JSON.parse(items) : items;
-  } catch (err) {
-    return next(new AppError("Invalid items format (must be JSON)", 400));
-  }
-
-  // --- Image (menu level) ---
-  const image = req.file
-    ? {
-        url: req.file.path || req.file.secure_url,
-        publicId: req.file.filename || req.file.public_id,
-      }
-    : { url: "", publicId: "" };
-
-  // --- Validation ---
+  // 1) Validation required fileds
   if (!hotelId) {
-    return next(new AppError("Hotel ID is required", 400));
+    return next(new AppError("HotelId requireds", 400));
   }
 
-  if (!category) {
-    return next(new AppError("Category is required", 400));
+  if (!categoryName) {
+    return next(new AppError("Category Name required", 400));
   }
 
-  if (veg === undefined) {
-    return next(new AppError("Veg/Non-veg status is required", 400));
+  // 2) Validate mongodb object
+  if (!mongoose.Types.ObjectId.isValid(hotelId)) {
+    return next(new AppError("Invalid hotelId format"));
   }
 
-  // --- Final Data ---
-  const menuItemData = {
+  // 3) Check for duplicate category name within the same hotel
+  const existingCategory = await MenuCategory.findOne({
     hotelId,
-    category,
+    categoryName,
+    isAvailable: true,
+  });
+
+  if (existingCategory) {
+    return next(
+      new AppError(
+        `Category '${categoryName}' already exists for this hotel.`,
+        400,
+      ),
+    );
+  }
+
+  // 4. Construct the payload
+  const categoryData = {
+    hotelId,
+    categoryName,
     veg,
-    image,
-    isAvailable,
+    ...(image && { image }), // Only add image if it exists in the request
+    ...(isAvailable !== undefined && { isAvailable }), // Fallback to schema default if not provided
   };
 
-  // --- Save ---
-  const newMenu = await MenuItem.create(menuItemData);
-
-  const {
-    __v,
-    softDeleted,
-    softDeletedAt,
-    createdAt,
-    updatedAt,
-    _id,
-    id,
-    isAvailable: _isAvailable,
-    ...filteredData
-  } = newMenu.toObject();
+  const newCategory = MenuCategory.create(categoryData);
 
   res.status(201).json({
-    status: "success",
-    message: "Menu created successfully",
-    data: filteredData,
-  });
-});
-/**
- * 1) Soft delete an item (mark as deleted but keep in database)
- */
-exports.softDeleteItem = catchAsync(async (req, res, next) => {
-  const { id, itemIndex } = req.params;
-
-  // Find and validate menu item
-  const menuItem = await findMenuItemById(id, next);
-  if (!menuItem) return;
-
-  // Validate item index
-  const idx = parseInt(itemIndex);
-  if (!validateItemIndex(menuItem, idx, next)) return;
-
-  // Check if already soft deleted
-  if (menuItem.items[idx].softDeleted) {
-    return next(new AppError("Item is already soft deleted", 400));
-  }
-
-  // Apply soft delete
-  menuItem.items[idx].softDeleted = true;
-  menuItem.items[idx].softDeletedAt = new Date();
-  menuItem.items[idx].isAvailable = false; // Also mark as unavailable
-
-  await menuItem.save();
-
-  res.status(200).json({
-    status: "success",
-    message: "Item soft deleted successfully",
-    data: {
-      item: menuItem.items[idx],
-      menuItemId: menuItem._id,
-    },
+    success: true,
+    message: "Menu category created successfully.",
+    data: newCategory,
   });
 });
 
 // Add new Item
-exports.addNewItem = catchAsync(async (req, res, next) => {
-  const { id } = req.params;
 
-  let { name, price, desc, rating, options, isAvailable } = req.body;
-
-  // --- Parse FormData values ---
-  price = price !== undefined ? Number(price) : undefined;
-  rating = rating !== undefined ? Number(rating) : 0;
-  isAvailable = isAvailable !== undefined ? isAvailable === "true" : true;
-
-  // options will come as string → parse it
-  if (options) {
-    try {
-      options = JSON.parse(options);
-    } catch (err) {
-      return next(new AppError("Invalid JSON format for options", 400));
-    }
-  } else {
-    options = [];
-  }
-
-  // --- Image (from multer / cloudinary middleware) ---
-  const itemImg = req.file
-    ? {
-        url: req.file.path || req.file.secure_url,
-        publicId: req.file.filename || req.file.public_id,
-      }
-    : { url: "", publicId: "" };
-
-  // --- Validation ---
-  if (!name) {
-    return next(new AppError("Item name is required", 400));
-  }
-
-  if (price === undefined || isNaN(price) || price < 0) {
-    return next(new AppError("Valid price is required", 400));
-  }
-
-  if (desc && desc.length < 10) {
-    return next(
-      new AppError("Description must be at least 10 characters", 400),
-    );
-  }
-
-  // --- Find menu ---
-  const menuItem = await findMenuItemById(id, next);
-  if (!menuItem) return;
-
-  if (menuItem.softDeleted) {
-    return next(new AppError("Cannot add item to deleted menu", 400));
-  }
-
-  // --- Validate options ---
-  if (!Array.isArray(options)) {
-    return next(new AppError("Options must be an array", 400));
-  }
-
-  for (let i = 0; i < options.length; i++) {
-    const option = options[i];
-
-    if (!option.name) {
-      return next(new AppError(`Option ${i} must have a name`, 400));
-    }
-
-    if (option.choices && Array.isArray(option.choices)) {
-      for (let j = 0; j < option.choices.length; j++) {
-        const choice = option.choices[j];
-
-        if (!choice.name) {
-          return next(
-            new AppError(`Choice ${j} in option ${i} must have a name`, 400),
-          );
-        }
-
-        // normalize priceMod
-        choice.priceMod =
-          choice.priceMod !== undefined ? Number(choice.priceMod) : 0;
-
-        if (isNaN(choice.priceMod) || choice.priceMod < 0) {
-          return next(
-            new AppError(`Invalid priceMod in choice ${j} of option ${i}`, 400),
-          );
-        }
-
-        choice.isAvailable =
-          choice.isAvailable !== undefined
-            ? choice.isAvailable === true || choice.isAvailable === "true"
-            : true;
-      }
-    } else {
-      option.choices = [];
-    }
-
-    option.required =
-      option.required !== undefined
-        ? option.required === true || option.required === "true"
-        : false;
-
-    option.isAvailable =
-      option.isAvailable !== undefined
-        ? option.isAvailable === true || option.isAvailable === "true"
-        : true;
-  }
-
-  // --- Create item ---
-  const newItem = {
-    name: name.trim(),
+exports.createMenuItem = catchAsync(async (req, res, next) => {
+  const {
+    hotelId,
+    categoryId,
+    name,
     price,
-    desc: desc ? desc.trim() : "",
-    rating,
-    isAvailable,
+    veg,
+    desc,
     itemImg,
     options,
-  };
+    isAvailable,
+  } = req.body;
 
-  // --- Save ---
-  menuItem.items.push(newItem);
-  await menuItem.save();
-
-  const addedItem = menuItem.items.at(-1);
-
-  res.status(201).json({
-    status: "success",
-    message: "Item added successfully",
-    data: {
-      item: addedItem,
-      itemIndex: menuItem.items.length - 1,
-      menuItemId: menuItem._id,
-      totalItems: menuItem.items.length,
-    },
-  });
-});
-
-// Hard Delete item
-/**
- * Hard delete an item from existing menu
- */
-exports.hardDeleteItem = catchAsync(async (req, res, next) => {
-  const { id, itemIndex } = req.params;
-
-  // Find menu item
-  const menuItem = await findMenuItemById(id, next);
-  if (!menuItem) return;
-
-  // Validate item index
-  const idx = parseInt(itemIndex);
-  if (!validateItemIndex(menuItem, idx, next)) return;
-
-  // Store the deleted item for response
-  const deletedItem = menuItem.items[idx];
-
-  // Remove item permanently
-  menuItem.items.splice(idx, 1);
-  await menuItem.save();
-
-  res.status(200).json({
-    status: "success",
-    message: "Item permanently deleted successfully",
-    data: {
-      deletedItem: deletedItem,
-      remainingItems: menuItem.items.length,
-      menuItemId: menuItem._id,
-    },
-  });
-});
-
-/**
- * 3) Restore a soft-deleted item
- */
-exports.restoreSoftDeleteItem = catchAsync(async (req, res, next) => {
-  const { id, itemIndex } = req.params;
-
-  // Find menu item
-  const menuItem = await findMenuItemById(id, next);
-  if (!menuItem) return;
-
-  // Validate item index
-  const idx = parseInt(itemIndex);
-  if (!validateItemIndex(menuItem, idx, next)) return;
-
-  // Check if item is not soft deleted
-  if (!menuItem.items[idx].softDeleted) {
-    return next(new AppError("Item is not soft deleted", 400));
+  // 1. Validate required core fields
+  if (!hotelId) {
+    return next(new AppError(`Please provide hotelId`, 400));
   }
 
-  // Restore the item
-  menuItem.items[idx].softDeleted = false;
-  menuItem.items[idx].softDeletedAt = null;
-  menuItem.items[idx].isAvailable = true; // Restore availability
+  if (!categoryId) {
+    return next(new AppError(`Please provide categoryId`, 400));
+  }
 
-  await menuItem.save();
+  if (!name) {
+    return next(new AppError(`Please provide name`, 400));
+  }
 
-  res.status(200).json({
-    status: "success",
-    message: "Item restored successfully",
-    data: {
-      item: menuItem.items[idx],
-      menuItemId: menuItem._id,
-    },
+  if (price === undefined) {
+    return next(new AppError(`Please provide price`, 400));
+  }
+
+  // 2. Ensure price is not negative
+  if (price < 0) {
+    return next(new AppError("Price can't be negative", 400));
+  }
+
+  // 3. Validate MongoDB ObjectIds to prevent casting errors
+  if (
+    !mongoose.Types.ObjectId.isValid(hotelId) ||
+    !mongoose.Types.ObjectId.isValid(categoryId)
+  ) {
+    return next(new AppError("Invalid hotelId or categoryId format.", 400));
+  }
+
+  // 4. Verify the Category exists AND belongs to the correct Hotel
+  const validCategory = await MenuCategory.findOne({
+    _id: categoryId,
+    hotelId: hotelId,
+    softDeleted: false,
   });
-});
 
-/**
- * Update an existing item
- */
-exports.updateItem = catchAsync(async (req, res, next) => {
-  const { id, itemIndex } = req.params;
-
-  // guard (prevents destructure crash)
-  if (!req.body) {
-    return next(new AppError("Request body is missing", 400));
-  }
-
-  let { name, price, desc, options } = req.body;
-
-  // --- Parse FormData values ---
-  if (price !== undefined) price = Number(price);
-  //   if (isAvailable !== undefined) isAvailable = isAvailable === "true";
-
-  if (options) {
-    try {
-      options = JSON.parse(options);
-    } catch (err) {
-      return next(new AppError("Invalid JSON format for options", 400));
-    }
-  }
-
-  // --- Image handling (multer / cloudinary) ---
-  const itemImg = req.file
-    ? {
-        url: req.file.path || req.file.secure_url,
-        publicId: req.file.filename || req.file.public_id,
-      }
-    : undefined;
-
-  // --- Find menu ---
-  const menuItem = await findMenuItemById(id, next);
-  if (!menuItem) return;
-
-  const idx = parseInt(itemIndex, 10);
-  if (!validateItemIndex(menuItem, idx, next)) return;
-
-  if (menuItem.items[idx].softDeleted) {
+  if (!validCategory) {
     return next(
-      new AppError("Cannot update a soft deleted item. Restore it first.", 400),
+      new AppError(
+        "The specified category does not exist for this hotel, or it has been deleted.",
+        400,
+      ),
     );
   }
 
-  const item = menuItem.items[idx];
+  // 5. Check for duplicate items within the SAME category
+  const existingItem = await Items.findOne({
+    hotelId,
+    categoryId,
+    name: name.trim(),
+    softDeleted: false,
+  });
 
-  // --- Update fields ---
-  if (name) item.name = name.trim();
-
-  if (price !== undefined) {
-    if (isNaN(price) || price < 0) {
-      return next(new AppError("Price must be a non-negative number", 400));
-    }
-    item.price = price;
+  if (existingItem) {
+    return next(
+      new AppError(
+        `An item named '${name}' already exists in this category.`,
+        409,
+      ),
+    );
   }
 
-  if (desc !== undefined) {
-    if (desc && desc.length < 10) {
-      return next(
-        new AppError("Description must be at least 10 characters", 400),
-      );
-    }
-    item.desc = desc.trim();
-  }
+  // 6. Construct the payload
+  const itemData = {
+    hotelId,
+    categoryId,
+    veg,
+    name,
+    price,
+    ...(desc && { desc }),
+    ...(itemImg && { itemImg }),
+    ...(options && { options }), // Mongoose will automatically validate the nested option schema
+    ...(isAvailable !== undefined && { isAvailable }),
+  };
 
-  if (rating !== undefined) {
-    if (isNaN(rating) || rating < 0 || rating > 5) {
-      return next(new AppError("Rating must be between 0 and 5", 400));
-    }
-    item.rating = rating;
-  }
+  // 7. Create and save the new item
+  const newItem = await Items.create(itemData);
 
-  if (isAvailable !== undefined) {
-    item.isAvailable = isAvailable;
-  }
-
-  if (itemImg) {
-    item.itemImg = itemImg;
-  }
-
-  // --- Validate + normalize options ---
-  if (options !== undefined) {
-    if (!Array.isArray(options)) {
-      return next(new AppError("Options must be an array", 400));
-    }
-
-    for (let i = 0; i < options.length; i++) {
-      const option = options[i];
-
-      if (!option.name) {
-        return next(new AppError(`Option ${i} must have a name`, 400));
-      }
-
-      option.required =
-        option.required !== undefined
-          ? option.required === true || option.required === "true"
-          : false;
-
-      option.isAvailable =
-        option.isAvailable !== undefined
-          ? option.isAvailable === true || option.isAvailable === "true"
-          : true;
-
-      if (option.choices && Array.isArray(option.choices)) {
-        for (let j = 0; j < option.choices.length; j++) {
-          const choice = option.choices[j];
-
-          if (!choice.name) {
-            return next(
-              new AppError(`Choice ${j} in option ${i} must have a name`, 400),
-            );
-          }
-
-          choice.priceMod =
-            choice.priceMod !== undefined ? Number(choice.priceMod) : 0;
-
-          if (isNaN(choice.priceMod) || choice.priceMod < 0) {
-            return next(
-              new AppError(
-                `Invalid priceMod in choice ${j} of option ${i}`,
-                400,
-              ),
-            );
-          }
-
-          choice.isAvailable =
-            choice.isAvailable !== undefined
-              ? choice.isAvailable === true || choice.isAvailable === "true"
-              : true;
-        }
-      } else {
-        option.choices = [];
-      }
-    }
-
-    item.options = options;
-  }
-
-  // --- Save ---
-  await menuItem.save();
-
-  res.status(200).json({
-    status: "success",
-    message: "Item updated successfully",
-    data: {
-      item,
-      itemIndex: idx,
-      menuItemId: menuItem._id,
-    },
+  res.status(201).json({
+    success: true,
+    message: "Menu item created successfully.",
+    data: newItem,
   });
 });
 
-/**
- * Update option availability
- */
+// UPDATE
+exports.updateItemAvailability = catchAsync(async (req, res, next) => {
+  const { id } = req.params;
+  const { isAvailable } = req.body;
+
+  if (typeof isAvailable !== "boolean") {
+    return next(new AppError("isAvailable must be a boolean", 400));
+  }
+
+  const item = await MenuItem.findOneAndUpdate(
+    { _id: id, softDeleted: false },
+    { isAvailable },
+    { new: true, select: "name isAvailable" },
+  );
+
+  if (!item) {
+    return next(new AppError("Menu item not found"));
+  }
+
+  res.status(200).json({
+    success: true,
+    message: `Item "${item.name}" is now ${isAvailable ? "available" : "unavailable"}`,
+    data: item,
+  });
+});
+
 exports.updateOptionAvailability = catchAsync(async (req, res, next) => {
-  const { id, itemIndex, optionIndex } = req.params;
+  const { itemId, optionId } = req.params;
   const { isAvailable } = req.body;
 
-  // Validate isAvailable parameter
-  if (isAvailable === undefined || typeof isAvailable !== "boolean") {
-    return next(new AppError("Please provide isAvailable as boolean", 400));
+  if (typeof isAvailable !== "boolean") {
+    return next(new AppError("isAvailable must be a boolean", 400));
   }
 
-  // Find menu item
-  const menuItem = await findMenuItemById(id, next);
-  if (!menuItem) return;
+  const item = await MenuItem.findOneAndUpdate(
+    {
+      _id: itemId,
+      softDeleted: false,
+      "options._id": optionId,
+    },
+    { $set: { "options.$.isAvailable": isAvailable } },
+    { new: true, select: "name options" },
+  );
 
-  // Validate item index
-  const itemIdx = parseInt(itemIndex);
-  if (!validateItemIndex(menuItem, itemIdx, next)) return;
+  if (!item) {
+    return next(new AppError("Menu item or option not found", 400));
+  }
 
-  // Validate option index
-  const optIdx = parseInt(optionIndex);
-  if (!validateOptionIndex(menuItem, itemIdx, optIdx, next)) return;
-
-  // Update option availability
-  menuItem.items[itemIdx].options[optIdx].isAvailable = isAvailable;
-  await menuItem.save();
+  const updatedOption = item.options.id(optionId);
 
   res.status(200).json({
-    status: "success",
-    message: `Option ${isAvailable ? "enabled" : "disabled"} successfully`,
-    data: {
-      option: menuItem.items[itemIdx].options[optIdx],
-      itemName: menuItem.items[itemIdx].name,
-      optionIndex: optIdx,
-      itemIndex: itemIdx,
-      menuItemId: menuItem._id,
-    },
+    message: `Option "${updatedOption.name}" is now ${isAvailable ? "available" : "unavailable"}`,
+    data: { itemId: item._id, option: updatedOption },
   });
 });
 
-/**
- * Update choice availability
- */
+// ─── Toggle choice-level availability ─────────────────────────────────────────
+
 exports.updateChoiceAvailability = catchAsync(async (req, res, next) => {
-  const { id, itemIndex, optionIndex, choiceIndex } = req.params;
+  const { itemId, optionId, choiceId } = req.params;
   const { isAvailable } = req.body;
 
-  // Validate isAvailable parameter
-  if (isAvailable === undefined || typeof isAvailable !== "boolean") {
-    return next(new AppError("Please provide isAvailable as boolean", 400));
+  console.log(req.params, req.body);
+
+  if (typeof isAvailable !== "boolean") {
+    return next(new AppError("isAvailable must must be a boolean", 400));
   }
 
-  // Find menu item
-  const menuItem = await findMenuItemById(id, next);
-  if (!menuItem) return;
+  // positional operator only matches the first array level, so we use
+  // arrayFilters to precisely target the nested choice
+  const item = await MenuItem.findOneAndUpdate(
+    {
+      _id: itemId,
+      softDeleted: false,
+      "options._id": optionId,
+      "options.choices._id": choiceId,
+    },
+    {
+      $set: {
+        "options.$[opt].choices.$[choice].isAvailable": isAvailable,
+      },
+    },
+    {
+      arrayFilters: [{ "opt._id": optionId }, { "choice._id": choiceId }],
+      new: true,
+      select: "name options",
+    },
+  );
 
-  // Validate indices
-  const itemIdx = parseInt(itemIndex);
-  const optIdx = parseInt(optionIndex);
-  const choiceIdx = parseInt(choiceIndex);
+  if (!item) {
+    return next(new AppError("Menu item, option, or choice not found", 404));
+  }
 
-  if (!validateItemIndex(menuItem, itemIdx, next)) return;
-  if (!validateOptionIndex(menuItem, itemIdx, optIdx, next)) return;
-  if (!validateChoiceIndex(menuItem, itemIdx, optIdx, choiceIdx, next)) return;
-
-  // Update choice availability
-  menuItem.items[itemIdx].options[optIdx].choices[choiceIdx].isAvailable =
-    isAvailable;
-  await menuItem.save();
+  const updatedOption = item.options.id(optionId);
+  const updatedChoice = updatedOption.choices.id(choiceId);
 
   res.status(200).json({
-    status: "success",
-    message: `Choice ${isAvailable ? "enabled" : "disabled"} successfully`,
-    data: {
-      choice: menuItem.items[itemIdx].options[optIdx].choices[choiceIdx],
-      choiceIndex: choiceIdx,
-      optionName: menuItem.items[itemIdx].options[optIdx].name,
-      itemName: menuItem.items[itemIdx].name,
-      menuItemId: menuItem._id,
-    },
+    data: { itemId: item._id, optionId, choice: updatedChoice },
   });
 });
 
-/**
- * Hard delete a choice
- */
-exports.deleteChoice = catchAsync(async (req, res, next) => {
-  const { id, itemIndex, optionIndex, choiceIndex } = req.params;
+// ─── Soft delete item ──────────────────────────────────────────────────────────
 
-  // Find menu item
-  const menuItem = await findMenuItemById(id, next);
-  if (!menuItem) return;
+exports.softDeleteItem = catchAsync(async (req, res, next) => {
+  const { itemId } = req.params;
 
-  // Validate indices
-  const itemIdx = parseInt(itemIndex);
-  const optIdx = parseInt(optionIndex);
-  const choiceIdx = parseInt(choiceIndex);
+  const item = await MenuItem.findOneAndUpdate(
+    { _id: itemId, softDeleted: false },
+    { softDeleted: true, softDeletedAt: new Date() },
+    { new: true, select: "name softDeleted softDeletedAt" },
+  );
 
-  if (!validateItemIndex(menuItem, itemIdx, next)) return;
-  if (!validateOptionIndex(menuItem, itemIdx, optIdx, next)) return;
-  if (!validateChoiceIndex(menuItem, itemIdx, optIdx, choiceIdx, next)) return;
-
-  // Store deleted choice for response
-  const deletedChoice =
-    menuItem.items[itemIdx].options[optIdx].choices[choiceIdx];
-
-  // Remove choice permanently
-  menuItem.items[itemIdx].options[optIdx].choices.splice(choiceIdx, 1);
-  await menuItem.save();
+  if (!item) {
+    return next(new AppError("Menu item not found or already deleted"), 404);
+  }
 
   res.status(200).json({
-    status: "success",
-    message: "Choice deleted successfully",
+    message: `Item "${item.name}" has been soft deleted`,
+    data: item,
+  });
+});
+
+// ─── Restore soft deleted item ────────────────────────────────────────────────
+
+exports.restoreItem = catchAsync(async (req, res, next) => {
+  const { itemId } = req.params;
+
+  const item = await MenuItem.findOneAndUpdate(
+    { _id: itemId, softDeleted: true },
+    { softDeleted: false, softDeletedAt: null },
+    { new: true, select: "name softDeleted softDeletedAt" },
+  );
+
+  if (!item) {
+    return next(new AppError("Menu item not found or not deleted"));
+  }
+
+  res.status(200).json({
+    message: `Item "${item.name}" has been restored`,
+    data: item,
+  });
+});
+
+// ─── Hard delete item ─────────────────────────────────────────────────────────
+
+exports.hardDeleteItem = catchAsync(async (req, res, next) => {
+  const { itemId } = req.params;
+
+  const item = await MenuItem.findOneAndDelete({ _id: itemId });
+
+  if (!item) {
+    return next(new AppError("Menu item not found", 404));
+  }
+
+  res.status(200).json({
+    message: `Item "${item.name}" has been permanently deleted`,
+    data: { deletedId: item._id },
+  });
+});
+
+// ─── Delete option from item ──────────────────────────────────────────────────
+
+exports.deleteOption = catchAsync(async (req, res, next) => {
+  const { itemId, optionId } = req.params;
+
+  const item = await MenuItem.findOneAndUpdate(
+    { _id: itemId, softDeleted: false, "options._id": optionId },
+    { $pull: { options: { _id: optionId } } },
+    { new: true, select: "name options" },
+  );
+
+  if (!item) {
+    return next(new AppError("Menu item or option not found", 404));
+  }
+
+  res.status(200).json({
+    message: `Option has been deleted from item "${item.name}"`,
+    data: { itemId: item._id, remainingOptions: item.options },
+  });
+});
+
+// ─── Delete choice from option ────────────────────────────────────────────────
+
+exports.deleteChoice = catchAsync(async (req, res, next) => {
+  const { itemId, optionId, choiceId } = req.params;
+
+  const item = await MenuItem.findOneAndUpdate(
+    {
+      _id: itemId,
+      softDeleted: false,
+      "options._id": optionId,
+      "options.choices._id": choiceId,
+    },
+    {
+      $pull: { "options.$[opt].choices": { _id: choiceId } },
+    },
+    {
+      arrayFilters: [{ "opt._id": optionId }],
+      new: true,
+      select: "name options",
+    },
+  );
+
+  if (!item) {
+    return next(new AppError("Menu item, option, or choice not found", 404));
+  }
+
+  const updatedOption = item.options.id(optionId);
+
+  res.status(200).json({
+    message: `Choice has been deleted from option "${updatedOption.name}"`,
     data: {
-      deletedChoice: deletedChoice,
-      remainingChoices: menuItem.items[itemIdx].options[optIdx].choices.length,
-      optionName: menuItem.items[itemIdx].options[optIdx].name,
-      itemName: menuItem.items[itemIdx].name,
-      menuItemId: menuItem._id,
+      itemId: item._id,
+      optionId,
+      remainingChoices: updatedOption.choices,
     },
   });
 });

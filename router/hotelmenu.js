@@ -51,7 +51,7 @@ router.route("/").get(authController.protect, hotelMenuController.allItem);
 //v2
 router
   .route("/:id/create")
-  .post(uploadImage.single("image"), hotelMenuController_v2.createMenu);
+  .post(uploadImage.single("image"), hotelMenuController_v2.createCategory);
 
 router.get("/:itemId", hotelMenuController.getItem);
 

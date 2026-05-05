@@ -149,7 +149,7 @@ exports.register = catchAsync(async (req, res, next) => {
 
 // Google callback
 exports.googleCallback = (req, res) => {
-  createSendToken(req.user, 200, res, "http://localhost:5173/welcome");
+  createSendToken(req.user, 200, res, "http://localhost:5173/");
 };
 // --- 3. LOGIN CONTROLLER ---
 exports.login = catchAsync(async (req, res, next) => {

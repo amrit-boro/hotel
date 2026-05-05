@@ -35,14 +35,10 @@ const HotelSchema = new mongoose.Schema(
       default: "",
     },
 
-    openingTime: {
+    logoUrlPublicId: {
       type: String,
-      default: "10:00",
-    },
-
-    closingTime: {
-      type: String,
-      default: "22:00",
+      trim: true,
+      default: "",
     },
 
     isActive: {

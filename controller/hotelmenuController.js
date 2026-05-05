@@ -1,5 +1,5 @@
 const catchAsync = require("../utils/catchAsync");
-const MenuItem = require("../models/menuItem");
+const MenuItem = require("../models/menuCategory");
 const mongoose = require("mongoose"); // Import mongoose for ID validation
 const menuPermission = require("../utils/checkMenuPermision");
 const Hotel = require("../models/hotel");

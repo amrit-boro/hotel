@@ -11,60 +11,48 @@ router.use(authController.protect, authController.restrictTo("owner"));
 /* =========================
    GET ROUTES
 ========================= */
-router.get(
-  "/:hotelId/available/full",
-  hotelMenuController_v2.getAvailableMenuItems,
-);
+
+router.get("/:hotelId/menuDetails", hotelMenuController_v2.menuDetails);
 
 /* =========================
    CREATE ROUTES
 ========================= */
-router.post(
-  "/add-item/:id",
-  uploadImage.single("image"),
-  (req, res, next) => {
-    console.log("file: ", req.file);
-  },
-  hotelMenuController_v2.addNewItem,
-);
 
-/* =========================
-   UPDATE ROUTES
-========================= */
-router.patch(
-  "/update-item/:id/:itemIndex",
-  uploadImage.single("image"),
-  hotelMenuController_v2.updateItem,
-);
+router
+  .route("/:id/createCategory")
+  .post(uploadImage.single("image"), hotelMenuController_v2.createCategory);
 
-router.patch(
-  "/:id/:itemIndex/restore",
-  hotelMenuController_v2.restoreSoftDeleteItem,
-);
+router
+  .route("/:id/createItem")
+  .post(uploadImage.single("image"), hotelMenuController_v2.createMenuItem);
 
-router.patch(
-  "/option-availability/:id/:itemIndex/:optionIndex",
-  hotelMenuController_v2.updateOptionAvailability,
-);
+router
+  .route("/:id/update-item")
+  .patch(hotelMenuController_v2.updateItemAvailability);
 
-router.patch(
-  "/choice-availability/:id/:itemIndex/:optionIndex/:choiceIndex",
-  hotelMenuController_v2.updateChoiceAvailability,
-);
+router
+  .route("/:itemId/:optionId/option-availability")
+  .patch(hotelMenuController_v2.updateOptionAvailability);
 
-/* =========================
-   DELETE ROUTES
-========================= */
+router
+  .route("/:itemId/:optionId/:choiceId/choice-availability")
+  .patch(hotelMenuController_v2.updateChoiceAvailability);
+
+// Item-level
+router.patch("/:itemId/soft-delete", hotelMenuController_v2.softDeleteItem); // soft delete
+router.patch("/:itemId/restore", hotelMenuController_v2.restoreItem); // undo soft delete
+router.delete("/:itemId", hotelMenuController_v2.hardDeleteItem); // permanent delete
+
+// Option-level
 router.delete(
-  "/hard-delete/:id/:itemIndex",
-  hotelMenuController_v2.hardDeleteItem,
+  "/:itemId/options/:optionId",
+  hotelMenuController_v2.deleteOption,
 );
 
+// Choice-level
 router.delete(
-  "/delete-choice/:id/:itemIndex/:optionIndex/:choiceIndex",
+  "/:itemId/options/:optionId/choices/:choiceId",
   hotelMenuController_v2.deleteChoice,
 );
-
-router.delete("/:id/:itemIndex", hotelMenuController_v2.softDeleteItem);
 
 module.exports = router;
