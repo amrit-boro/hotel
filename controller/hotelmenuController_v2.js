@@ -7,35 +7,49 @@ const AppError = require("../utils/appError");
 
 // Get menu
 exports.menuDetails = catchAsync(async (req, res, next) => {
-  console.log("hello from the menuDetils");
   const { hotelId } = req.params;
 
-  // Validate hotelId
+  // 1) Validate hotelId
   if (!mongoose.Types.ObjectId.isValid(hotelId)) {
-    return next(new AppError("Invalid hotelId"));
+    return next(new AppError("Invalid hotelId", 400));
   }
 
-  // 2) fetch categories
+  // 2) Fetch categories
   const categories = await MenuCategory.find({
     hotelId,
     isAvailable: true,
     softDeleted: false,
   })
-    .select("_id name veg")
+    .select("_id categoryName veg")
     .lean();
 
-  // 3 fetch Item
+  // 3) Fetch items
   const items = await MenuItem.find({
     hotelId,
     isAvailable: true,
-    softDeleted: true,
+    softDeleted: false,
   })
     .select("categoryId name price desc rating itemImg options")
     .lean();
 
+  // 4) Create map + filter options/choices
   const itemsMap = {};
+
   for (const item of items) {
     const key = item.categoryId.toString();
+
+    // Filter options and choices
+    item.options = (item.options || [])
+      .filter((opt) => opt.isAvailable)
+      .map((opt) => ({
+        ...opt,
+        choices: (opt.choices || []).filter((choice) => choice.isAvailable),
+      }));
+
+    // (Optional) remove option if no choices left
+    item.options = item.options.filter((opt) => opt.choices.length > 0);
+
+    // Build map
     if (!itemsMap[key]) {
       itemsMap[key] = [];
     }
@@ -43,20 +57,21 @@ exports.menuDetails = catchAsync(async (req, res, next) => {
     itemsMap[key].push(item);
   }
 
+  // 5) Merge categories with items
   const result = categories.map((cat) => ({
     _id: cat._id,
-    name: cat.name,
+    name: cat.categoryName,
     veg: cat.veg,
     items: itemsMap[cat._id.toString()] || [],
   }));
 
+  // 6) Send response
   res.status(200).json({
     status: "success",
     results: result.length,
     data: result,
   });
 });
-
 /**
  * 5) Create a complete menu with multiple items
  */
@@ -209,6 +224,251 @@ exports.createMenuItem = catchAsync(async (req, res, next) => {
     success: true,
     message: "Menu item created successfully.",
     data: newItem,
+  });
+});
+
+// update menuItem
+exports.updateMenuItem = catchAsync(async (req, res, next) => {
+  const { itemId } = req.params;
+
+  const ALLOWED_FIELDS = [
+    "name",
+    "price",
+    "desc",
+    "veg",
+    "categoryId",
+    "itemImg",
+  ];
+
+  const updates = Object.keys(req.body).filter((key) =>
+    ALLOWED_FIELDS.includes(key).reduce(
+      (acc, key) => ({
+        ...acc,
+        [key]: req.body[key],
+      }),
+      {},
+    ),
+  );
+
+  if (Object.keys(updates).length === 0) {
+    return next(new AppError("No valid fields procided", 400));
+  }
+
+  // ── Field-level validations ──────────────────────────────────────────────
+  if (updates.price !== undefined && updates.price < 0) {
+    return next(new AppError("Price cann't be negative", 400));
+  }
+
+  if (updates.desc !== undefined && updates.desc.length < 10) {
+    return next(
+      new AppError("Description must be at least 10 characters", 400),
+    );
+  }
+
+  if (updates.veg !== undefined && typeof updates.veg !== "boolean") {
+    return next(new AppError("veg must be boolean", 400));
+  }
+
+  if (updates.itemImg !== undefined) {
+    const { url, publicId } = updates.itemImg;
+    if (typeof url !== "string" || typeof publicId !== "string") {
+      return next(
+        new AppError("itemImg must have url and publicId as strings", 400),
+      );
+    }
+  }
+
+  const item = await MenuItem.findOneAndUpdate(
+    { _id: itemId, softDeleted: false },
+    { $set: updates },
+    { new: true, runValidators: true },
+  );
+
+  if (!item) {
+    return next(new AppError("Menu item not found", 404));
+  }
+
+  res.status(200).json({
+    message: `Item "${item.name}" updated successfully`,
+    data: item,
+  });
+});
+
+exports.addOption = catchAsync(async (req, res, next) => {
+  const { itemId } = req.params;
+  const { name, required = false, choices = [] } = req.body;
+
+  if (!name || typeof name !== "string" || name.trim() === "") {
+    return next(new AppError("Option name is required", 400));
+  }
+
+  if (!Array.isArray(choices)) {
+    return next(new AppError("Choices must be an array"));
+  }
+
+  // redefind
+  const newOption = { name: name.trim(), required: true, choices };
+
+  const item = await MenuItem.findOneAndUpdate(
+    { _id: itemId, softDeleted: false },
+    { $push: { options: newOption } },
+    { new: true, runValidators: true, select: "name options" },
+  );
+
+  if (!item) {
+    return next(new AppError("Item not found", 400));
+  }
+
+  const addedOption = item.options[item.options.length - 1];
+  res.status(201).json({
+    message: `Option "${addedOption.name}" added to item "${item.name}"`,
+    data: { itemId: item._id, option: addedOption },
+  });
+});
+
+exports.updateOption = catchAsync(async (req, res, next) => {
+  const { itemId, optionId } = req.params;
+
+  const ALLOWED_FIELDS = ["name", "required"];
+
+  const updates = Object.keys(req.body)
+    .filter((key) => ALLOWED_FIELDS.includes(key))
+    .reduce(
+      (acc, key) => ({ ...acc, [`options.$.${key}`]: req.body[key] }),
+      {},
+    );
+
+  if (Object.keys(updates).length === 0) {
+    return next(new AppError("No valid fields provided", 400));
+  }
+
+  if (req.body.name !== undefined && req.body.name.trim() === "") {
+    return next(new AppError("Option name cannot be empty", 400));
+  }
+
+  if (
+    req.body.required !== undefined &&
+    typeof req.body.required !== "boolean"
+  ) {
+    return next(new AppError("required must be a boolean", 400));
+  }
+
+  const item = await MenuItem.findOneAndUpdate(
+    { _id: itemId, softDeleted: false, "options._id": optionId },
+    { $set: updates },
+    { new: true, runValidators: true, select: "name options" },
+  );
+
+  if (!item) {
+    return next(new AppError("Menu item or option not found", 400));
+  }
+
+  const updatedOption = item.options.id(optionId);
+
+  res.status(200).json({
+    message: `Option "${updatedOption.name}" updated successfully`,
+    data: { itemId: item._id, option: updatedOption },
+  });
+});
+
+// ─── Add a new choice to an option ────────────────────────────────────────────
+
+exports.addChoice = catchAsync(async (req, res, next) => {
+  const { itemId, optionId } = req.params;
+  const { name, priceMod = 0 } = req.body;
+
+  if (!name || typeof name !== "string" || name.trim() === "") {
+    return next(new AppError("Choice name is required", 400));
+  }
+
+  if (priceMod < 0) {
+    return next(new AppError("Pricemod cann't be negative", 400));
+  }
+
+  const newChoice = { name: name.trim(), priceMod };
+
+  const item = await MenuItem.findOneAndUpdate(
+    { _id: itemId, softDeleted: false, "options._id": optionId },
+    { $push: { "options.$[opt].choices": newChoice } },
+    {
+      arrayFilters: [{ "opt._id": optionId }],
+      new: true,
+      runValidators: true,
+      select: "name options",
+    },
+  );
+
+  if (!item) {
+    return next(new AppError("Menu item or option not found", 404));
+  }
+
+  const updatedOption = item.options.id(optionId);
+  const addedChoice = updatedOption.choices[updatedOption.choices.length - 1];
+
+  res.status(201).json({
+    message: `Choice "${addedChoice.name}" added to option "${updatedOption.name}"`,
+    data: { itemId: item._id, optionId, choice: addedChoice },
+  });
+});
+
+// ─── Update an existing choice ────────────────────────────────────────────────
+
+exports.updateChoice = catchAsync(async (req, res, next) => {
+  const { itemId, optionId, choiceId } = req.params;
+
+  const ALLOWED_FIELDS = ["name", "priceMod"];
+
+  const rawUpdates = Object.keys(req.body)
+    .filter((key) => ALLOWED_FIELDS.includes(key))
+    .reduce((acc, key) => ({ ...acc, [key]: req.body[key] }), {});
+
+  if (Object.keys(rawUpdates).length === 0) {
+    return next(new AppError("No valid fields provided", 400));
+  }
+
+  if (rawUpdates.name !== undefined && rawUpdates.name.trim() === "") {
+    return next(new AppError("Choice name cannot be empty", 400));
+  }
+
+  if (rawUpdates.priceMod !== undefined && rawUpdates.priceMod < 0) {
+    return next(new AppError("Menu item, option, or choice not found", 400));
+  }
+
+  // Map updates to the nested path
+  const updates = Object.keys(rawUpdates).reduce(
+    (acc, key) => ({
+      ...acc,
+      [`options.$[opt].choices.$[choice].${key}`]: rawUpdates[key],
+    }),
+    {},
+  );
+
+  const item = await MenuItem.findOneAndUpdate(
+    {
+      _id: itemId,
+      softDeleted: false,
+      "options._id": optionId,
+      "options.choices._id": choiceId,
+    },
+    { $set: updates },
+    {
+      arrayFilters: [{ "opt._id": optionId }, { "choice._id": choiceId }],
+      new: true,
+      runValidators: true,
+      select: "name options",
+    },
+  );
+
+  if (!item) {
+    return next(new AppError("Menu item, option, or choice not found", 404));
+  }
+
+  const updatedOption = item.options.id(optionId);
+  const updatedChoice = updatedOption.choices.id(choiceId);
+
+  res.status(200).json({
+    message: `Choice "${updatedChoice.name}" updated successfully`,
+    data: { itemId: item._id, optionId, choice: updatedChoice },
   });
 });
 

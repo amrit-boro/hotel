@@ -26,8 +26,12 @@ router
   .route("/:id/createItem")
   .post(uploadImage.single("image"), hotelMenuController_v2.createMenuItem);
 
+// update route
+
+router.route("/:itemId/updateItem", hotelMenuController_v2.updateMenuItem);
+
 router
-  .route("/:id/update-item")
+  .route("/:id/update-itemAvailability")
   .patch(hotelMenuController_v2.updateItemAvailability);
 
 router
@@ -42,6 +46,20 @@ router
 router.patch("/:itemId/soft-delete", hotelMenuController_v2.softDeleteItem); // soft delete
 router.patch("/:itemId/restore", hotelMenuController_v2.restoreItem); // undo soft delete
 router.delete("/:itemId", hotelMenuController_v2.hardDeleteItem); // permanent delete
+
+// Options
+router.post("/:itemId/options", hotelMenuController_v2.addOption);
+router.patch("/:itemId/options/:optionId", hotelMenuController_v2.updateOption);
+
+// Choices
+router.post(
+  "/:itemId/options/:optionId/choices",
+  hotelMenuController_v2.addChoice,
+);
+router.patch(
+  "/:itemId/options/:optionId/choices/:choiceId",
+  hotelMenuController_v2.updateChoice,
+);
 
 // Option-level
 router.delete(

@@ -95,8 +95,29 @@ const MenuItemSchema = new mongoose.Schema(
               type: Boolean,
               default: true,
             },
+            softDeleted: {
+              type: Boolean,
+              default: false,
+              index: true,
+            },
+
+            softDeletedAt: {
+              type: Date,
+              default: null,
+            },
           },
         ],
+
+        softDeleted: {
+          type: Boolean,
+          default: false,
+          index: true,
+        },
+
+        softDeletedAt: {
+          type: Date,
+          default: null,
+        },
       },
     ],
 
