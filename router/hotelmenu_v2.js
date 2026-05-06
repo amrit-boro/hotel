@@ -13,17 +13,23 @@ router.use(authController.protect, authController.restrictTo("owner"));
 ========================= */
 
 router.get("/:hotelId/menuDetails", hotelMenuController_v2.menuDetails);
+router.get(
+  "/:hotelId/categories",
+  hotelMenuController_v2.getCategoriesViewData,
+);
+
+router.get("/:hotelId/menuItems", hotelMenuController_v2.getMenuItemViewData);
 
 /* =========================
    CREATE ROUTES
 ========================= */
 
 router
-  .route("/:id/createCategory")
+  .route("/createCategory")
   .post(uploadImage.single("image"), hotelMenuController_v2.createCategory);
 
 router
-  .route("/:id/createItem")
+  .route("/createItem")
   .post(uploadImage.single("image"), hotelMenuController_v2.createMenuItem);
 
 // update route

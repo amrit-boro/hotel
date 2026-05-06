@@ -72,6 +72,52 @@ exports.menuDetails = catchAsync(async (req, res, next) => {
     data: result,
   });
 });
+
+// Get categories
+
+exports.getCategoriesViewData = catchAsync(async (req, res, next) => {
+  const { hotelId } = req.params;
+
+  // 1. Validate hotelId
+  if (!hotelId || !mongoose.Types.ObjectId.isValid(hotelId)) {
+    return next(new AppError("Please provide a valid hotelId", 400));
+  }
+
+  // 2. Fetch categories
+  const categoriesRaw = await MenuCategory.find({ hotelId })
+    .select("categoryName")
+    .lean();
+
+  const counts = await MenuItem.aggregate([
+    { $match: { hotelId: new mongoose.Types.ObjectId(hotelId) } },
+    {
+      $group: {
+        _id: "$categoryId",
+        count: { $sum: 1 },
+      },
+    },
+  ]);
+
+  const countMap = {};
+  counts.forEach((c) => {
+    countMap[c._id.toString()] = c.count;
+  });
+
+  const categories = categoriesRaw.map((c) => ({
+    _id: c._id,
+    name: c.categoryName,
+    itemCount: countMap[c._id.toString()] || 0,
+  }));
+  // 5. Send response
+  res.status(200).json({
+    status: "success",
+    results: categories.length,
+    data: {
+      categories,
+    },
+  });
+});
+
 /**
  * 5) Create a complete menu with multiple items
  */
@@ -224,6 +270,34 @@ exports.createMenuItem = catchAsync(async (req, res, next) => {
     success: true,
     message: "Menu item created successfully.",
     data: newItem,
+  });
+});
+
+// Get menuItem view data
+exports.getMenuItemViewData = catchAsync(async (req, res, next) => {
+  const { hotelId } = req.params;
+
+  if (!mongoose.Types.ObjectId.isValid(hotelId)) {
+    return next(new AppError("Invalid hotelId"));
+  }
+
+  // Run in parallel (important for performance)
+  const [categories, items] = await Promise.all([
+    MenuCategory.find({ hotelId }).select("_id categoryName").lean(),
+
+    MenuItem.find({ hotelId })
+      .select(
+        "_id name veg price desc categoryId options isAvailable softDeleted itemImg",
+      )
+      .lean(),
+  ]);
+
+  res.status(200).json({
+    status: "success",
+    data: {
+      categories,
+      items,
+    },
   });
 });
 
@@ -533,8 +607,6 @@ exports.updateOptionAvailability = catchAsync(async (req, res, next) => {
 exports.updateChoiceAvailability = catchAsync(async (req, res, next) => {
   const { itemId, optionId, choiceId } = req.params;
   const { isAvailable } = req.body;
-
-  console.log(req.params, req.body);
 
   if (typeof isAvailable !== "boolean") {
     return next(new AppError("isAvailable must must be a boolean", 400));
