@@ -28,13 +28,25 @@ router
   .route("/createCategory")
   .post(uploadImage.single("image"), hotelMenuController_v2.createCategory);
 
+router.post(
+  "/categoryImageUpload/:id",
+  uploadImage.single("image"),
+  hotelMenuController_v2.uploadCategoryImage,
+);
+
+// DELETE CATEGORY
+router.delete(
+  "/:categoryId/deleteCategory",
+  hotelMenuController_v2.deleteCategory,
+);
+
 router
   .route("/createItem")
   .post(uploadImage.single("image"), hotelMenuController_v2.createMenuItem);
 
 // update route
 
-router.route("/:itemId/updateItem", hotelMenuController_v2.updateMenuItem);
+router.patch("/:itemId/updateItem", hotelMenuController_v2.updateMenuItem);
 
 router
   .route("/:id/update-itemAvailability")

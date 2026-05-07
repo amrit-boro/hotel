@@ -124,51 +124,122 @@ exports.getCategoriesViewData = catchAsync(async (req, res, next) => {
 exports.createCategory = catchAsync(async (req, res, next) => {
   const { hotelId, categoryName, veg, image, isAvailable } = req.body;
 
-  // 1) Validation required fileds
+  // 1) Validate required fields
   if (!hotelId) {
-    return next(new AppError("HotelId requireds", 400));
+    return next(new AppError("Hotel ID is required.", 400)); // Fixed typo
   }
 
   if (!categoryName) {
-    return next(new AppError("Category Name required", 400));
+    return next(new AppError("Category Name is required.", 400));
   }
 
-  // 2) Validate mongodb object
+  // 2) Validate MongoDB ObjectId format
   if (!mongoose.Types.ObjectId.isValid(hotelId)) {
-    return next(new AppError("Invalid hotelId format"));
+    return next(new AppError("Invalid hotel ID format.", 400)); // Added missing 400 status
   }
+
+  // Clean the input to prevent trailing space bugs
+  const cleanName = categoryName.trim();
 
   // 3) Check for duplicate category name within the same hotel
   const existingCategory = await MenuCategory.findOne({
-    hotelId,
-    categoryName,
-    isAvailable: true,
+    hotelId: new mongoose.Types.ObjectId(hotelId),
+    softDeleted: false,
+    categoryName: {
+      $regex: new RegExp(
+        `^${cleanName.replace(/[-[\]{}()*+?.,\\^$|#\s]/g, "\\$&")}$`,
+        "i",
+      ),
+    },
   });
 
   if (existingCategory) {
-    return next(
-      new AppError(
-        `Category '${categoryName}' already exists for this hotel.`,
-        400,
-      ),
-    );
+    return next(new AppError(`Category '${cleanName}' already exists.`, 400));
   }
 
-  // 4. Construct the payload
+  // 4) Construct the payload
   const categoryData = {
     hotelId,
-    categoryName,
-    veg,
-    ...(image && { image }), // Only add image if it exists in the request
-    ...(isAvailable !== undefined && { isAvailable }), // Fallback to schema default if not provided
+    categoryName: cleanName, // FIX: Save the cleaned name to the database
+    ...(veg !== undefined && { veg }), // Safety check in case veg is false
+    ...(image && { image }),
+    ...(isAvailable !== undefined && { isAvailable }),
   };
 
-  const newCategory = MenuCategory.create(categoryData);
+  // 5) Save to Database
+  const newCategory = await MenuCategory.create(categoryData);
 
+  // 6) Send Response
   res.status(201).json({
     success: true,
     message: "Menu category created successfully.",
     data: newCategory,
+  });
+});
+// Delete category
+exports.deleteCategory = catchAsync(async (req, res, next) => {
+  const { categoryId } = req.params;
+
+  const session = await mongoose.startSession();
+  try {
+    session.startTransaction();
+    // delete category directly
+    const category = await MenuCategory.findByIdAndDelete(categoryId);
+
+    if (!category) {
+      await session.abortTransaction();
+      session.endSession();
+      return next(new AppError("Category not found", 404));
+    }
+
+    // delete related items
+    await MenuItem.deleteMany({
+      categoryId,
+    });
+
+    await session.commitTransaction();
+    session.endSession();
+
+    res.status(200).json({
+      status: "success",
+      message: "Category permanently deleted",
+    });
+  } catch (err) {
+    await session.abortTransaction();
+    session.endSession();
+    return next(err);
+  }
+});
+
+exports.uploadCategoryImage = catchAsync(async (req, res, next) => {
+  // Check image
+
+  const { id } = req.params;
+  if (!req.file) {
+    return next(new AppError("Please provide an image", 400));
+  }
+
+  // 2) Find category
+  const category = await MenuCategory.findById(id);
+
+  if (!category) {
+    return next(new AppError("Category not found", 404));
+  }
+
+  // 3. Store image info in DB
+  category.image = {
+    url: req.file.path,
+    publicId: req.file.filename,
+  };
+
+  await category.save();
+
+  // 4. Response
+  res.status(200).json({
+    status: "success",
+    data: {
+      category,
+    },
   });
 });
 
@@ -305,24 +376,17 @@ exports.getMenuItemViewData = catchAsync(async (req, res, next) => {
 exports.updateMenuItem = catchAsync(async (req, res, next) => {
   const { itemId } = req.params;
 
-  const ALLOWED_FIELDS = [
-    "name",
-    "price",
-    "desc",
-    "veg",
-    "categoryId",
-    "itemImg",
-  ];
+  const ALLOWED_FIELDS = ["name", "price", "desc", "veg", "itemImg"];
 
-  const updates = Object.keys(req.body).filter((key) =>
-    ALLOWED_FIELDS.includes(key).reduce(
+  const updates = Object.keys(req.body)
+    .filter((key) => ALLOWED_FIELDS.includes(key))
+    .reduce(
       (acc, key) => ({
         ...acc,
         [key]: req.body[key],
       }),
       {},
-    ),
-  );
+    );
 
   if (Object.keys(updates).length === 0) {
     return next(new AppError("No valid fields procided", 400));
