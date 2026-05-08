@@ -87,6 +87,11 @@ exports.getCategoriesViewData = catchAsync(async (req, res, next) => {
   const categoriesRaw = await MenuCategory.find({ hotelId })
     .select("categoryName")
     .lean();
+  // const T = await MenuCategory.find({ hotelId })
+  //   .select("categoryName")
+  //   .lean()
+  //   .explain("executionStats");
+  // console.log("EXPLAIN: ", T);
 
   const counts = await MenuItem.aggregate([
     { $match: { hotelId: new mongoose.Types.ObjectId(hotelId) } },
