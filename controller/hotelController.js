@@ -82,3 +82,15 @@ exports.registerHotel = catchAsync(async (req, res, next) => {
     session.endSession();
   }
 });
+
+exports.getHotel = catchAsync(async (req, res, next) => {
+  const hotel = await Hotel.findOne({
+    _id: req.params.id,
+    ownerId: req.user._id,
+    isActive: true,
+  });
+
+  if (!hotel) return next(new AppError("Hotel not found", 404));
+
+  res.status(200).json({ status: "success", data: { hotel } });
+});

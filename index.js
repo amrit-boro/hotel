@@ -69,7 +69,7 @@ app.use(cookieParser());
 // 7. ROUTES
 
 app.use("/api/v1/auth", authrouter);
-app.use("/api/v1/hotel", manageHotel);
+app.use("/api/v1", manageHotel);
 // app.use("/api/hotelStaff", manageHotelstaff);
 // app.use("/api/v1/menu", hotelMenu);
 app.use("/api/v2/menu", hotelMenu_v2);

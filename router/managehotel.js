@@ -6,8 +6,9 @@ const { uploadImage, cloudinary } = require("../utils/cloudinary");
 const router = express.Router();
 router.use(authController.protect);
 router
-  .route("/register")
+  .route("/hotel/register")
   .post(uploadImage.single("logo"), hotelController.registerHotel);
-// get hotel
+
+router.get("/hotel/:id", hotelController.getHotel);
 
 module.exports = router;

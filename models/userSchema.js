@@ -31,17 +31,6 @@ const UserSchema = new mongoose.Schema(
       },
       select: false, // Security: Never show password in output
     },
-    // passwordConfirm: {
-    //   type: String,
-    //   required: [true, "Please confirm your password"],
-    //   validate: {
-    //     // This only works on CREATE and SAVE!!!
-    //     validator: function (el) {
-    //       return el === this.password;
-    //     },
-    //     message: "Passwords are not the same!",
-    //   },
-    // },
     passwordChangedAt: Date, // Tracks when password was last changed
     passwordResetToken: String, // Stores the Hashed Token
     passwordResetExpires: Date, // Stores the Expiry Time
