@@ -66,6 +66,11 @@ const MenuItemSchema = new mongoose.Schema(
           required: true,
           trim: true,
         },
+        price: {
+          type: Number,
+          default: 0,
+          min: 0,
+        },
 
         required: {
           type: Boolean,

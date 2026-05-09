@@ -87,11 +87,6 @@ exports.getCategoriesViewData = catchAsync(async (req, res, next) => {
   const categoriesRaw = await MenuCategory.find({ hotelId })
     .select("categoryName")
     .lean();
-  // const T = await MenuCategory.find({ hotelId })
-  //   .select("categoryName")
-  //   .lean()
-  //   .explain("executionStats");
-  // console.log("EXPLAIN: ", T);
 
   const counts = await MenuItem.aggregate([
     { $match: { hotelId: new mongoose.Types.ObjectId(hotelId) } },
@@ -437,11 +432,64 @@ exports.updateMenuItem = catchAsync(async (req, res, next) => {
   });
 });
 
+// GET OPTIONS FOR A MENU ITEM
+
+exports.getMenuItemOptions = catchAsync(async (req, res, next) => {
+  const { itemId } = req.params;
+
+  if (!mongoose.Types.ObjectId.isValid(itemId)) {
+    return res.status(400).json({
+      status: "fail",
+      message: "Invalid itemId",
+    });
+  }
+
+  const menuItem = await MenuItem.findById(itemId).select("options");
+
+  if (!menuItem) {
+    return res.status(404).json({
+      status: "fail",
+      message: "Menu item not found",
+    });
+  }
+
+  const options = menuItem.options
+    .filter((opt) => !opt.softDeleted)
+    .map((opt) => ({
+      _id: opt._id,
+      name: opt.name,
+      price: opt.price,
+      required: opt.required,
+      isAvailable: opt.isAvailable,
+      choices: (opt.choices || [])
+        .filter((ch) => !ch.softDeleted)
+        .map((ch) => ({
+          _id: ch._id,
+          name: ch.name,
+          priceMod: ch.priceMod,
+          isAvailable: ch.isAvailable,
+        })),
+    }));
+
+  return res.status(200).json({
+    status: "success",
+    results: options.length,
+    data: options,
+  });
+});
+
 exports.addOption = catchAsync(async (req, res, next) => {
   const { itemId } = req.params;
-  const { name, required = false, choices = [] } = req.body;
+  const { name, required = false, price, choices = [] } = req.body;
+
+  console.log("body: ", name, required, "choice: ", choices);
+  console.log(req.body);
 
   if (!name || typeof name !== "string" || name.trim() === "") {
+    return next(new AppError("Option name is required", 400));
+  }
+
+  if (!price) {
     return next(new AppError("Option name is required", 400));
   }
 
@@ -450,7 +498,12 @@ exports.addOption = catchAsync(async (req, res, next) => {
   }
 
   // redefind
-  const newOption = { name: name.trim(), required: true, choices };
+  const newOption = {
+    name: name.trim(),
+    price: price,
+    required: required,
+    choices,
+  };
 
   const item = await MenuItem.findOneAndUpdate(
     { _id: itemId, softDeleted: false },
