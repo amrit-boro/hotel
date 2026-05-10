@@ -6,61 +6,82 @@ const UserSchema = new mongoose.Schema(
   {
     name: {
       type: String,
-      required: [true, "Please tell us your name!"],
+      required: [true, "Please tell us your name"],
       trim: true,
+      minlength: [2, "Name must be at least 2 characters"],
+      maxlength: [50, "Name too long"],
     },
+
     email: {
       type: String,
       required: [true, "Please provide your email"],
       unique: true,
       lowercase: true,
       trim: true,
-      match: [/^\S+@\S+\.\S+$/, "Please enter a valid email"],
+
+      validate: {
+        validator: function (v) {
+          return /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(v);
+        },
+        message: "Please provide a valid email",
+      },
     },
-    photo: String,
+
+    photo: {
+      type: String,
+      default: "",
+    },
+
     role: {
       type: String,
       enum: ["superadmin", "owner", "user"],
       default: "user",
     },
-    googleId: { type: String },
+
+    googleId: {
+      type: String,
+      default: null,
+    },
+
     password: {
       type: String,
+
       required: function () {
-        return !this.googleId; // Only required for normal signup
+        return !this.googleId;
       },
-      select: false, // Security: Never show password in output
+
+      minlength: [6, "Password must be at least 6 characters"],
+
+      select: false,
     },
-    passwordChangedAt: Date, // Tracks when password was last changed
-    passwordResetToken: String, // Stores the Hashed Token
-    passwordResetExpires: Date, // Stores the Expiry Time
+
+    passwordChangedAt: Date,
+
+    passwordResetToken: String,
+
+    passwordResetExpires: Date,
   },
   {
     timestamps: true,
   },
 );
 
-// ===============================================================================================
-// Pre
-// ===============================================================================================
-// --- MIDDLEWARE: Encryption & Cleanup ---
-
-// --- MIDDLEWARE: Encryption & Cleanup ---
+// ======================================================
+// HASH PASSWORD
+// ======================================================
 
 UserSchema.pre("save", async function () {
-  // 1. If password wasn't modified, exit the function immediately.
-  // (In an async function, 'return' acts like 'next()')
-  if (!this.isModified("password")) return;
+  // only run if password modified
+  if (!this.isModified("password")) {
+    return;
+  }
 
-  // 2. Hash the password with cost of 12
   this.password = await bcrypt.hash(this.password, 12);
-
-  // 3. Delete passwordConfirm field
-  this.passwordConfirm = undefined;
-
-  // No need to call next()!
-  // When this function finishes successfully, Mongoose moves on.
 });
+
+// ======================================================
+// CHECK PASSWORD
+// ======================================================
 
 UserSchema.methods.correctPassword = async function (
   candidatePassword,
@@ -69,38 +90,37 @@ UserSchema.methods.correctPassword = async function (
   return await bcrypt.compare(candidatePassword, userPassword);
 };
 
-// Inside models/User.js
+// ======================================================
+// CHECK PASSWORD CHANGED AFTER JWT
+// ======================================================
 
 UserSchema.methods.changedPasswordAfter = function (JWTTimestamp) {
   if (this.passwordChangedAt) {
-    // Convert date to timestamp (seconds) to match JWT format
     const changedTimestamp = parseInt(
       this.passwordChangedAt.getTime() / 1000,
       10,
     );
 
-    // If password changed time > token issue time, then token is OLD/INVALID
     return changedTimestamp > JWTTimestamp;
   }
 
-  // False means password was NOT changed
   return false;
 };
 
+// ======================================================
+// CREATE RESET TOKEN
+// ======================================================
+
 UserSchema.methods.createPasswordResetToken = function () {
-  // 1. Generate a random 32-character hex string
   const resetToken = crypto.randomBytes(32).toString("hex");
 
-  // 2. Hash it and save to Database (Security: Never save raw tokens)
   this.passwordResetToken = crypto
     .createHash("sha256")
     .update(resetToken)
     .digest("hex");
 
-  // 3. Set expiration (10 minutes from now)
   this.passwordResetExpires = Date.now() + 10 * 60 * 1000;
 
-  // 4. Return the RAW token (to send in email)
   return resetToken;
 };
 

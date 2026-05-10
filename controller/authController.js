@@ -134,16 +134,44 @@ exports.protect = catchAsync(async (req, res, next) => {
 // const generateToken = (payload) => {};
 
 exports.register = catchAsync(async (req, res, next) => {
+  const { name, email, password } = req.body;
+
+  // Validate name
+  if (!name || name.trim().length < 2) {
+    return next(new AppError("Name must be at least 2 characters", 400));
+  }
+
+  // Validate email
+  const cleanEmail = email?.trim().toLowerCase();
+
+  const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/;
+
+  if (!cleanEmail || !emailRegex.test(cleanEmail)) {
+    return next(new AppError("Please provide a valid email", 400));
+  }
+
+  // Validate password
+  if (!password || password.length < 6) {
+    return next(new AppError("Password must be at least 6 characters", 400));
+  }
+
+  // Check existing user
+  const existingUser = await User.findOne({
+    email: cleanEmail,
+  });
+
+  if (existingUser) {
+    return next(new AppError("Email already registered", 400));
+  }
+
+  // Create user
   const newUser = await User.create({
-    name: req.body.name,
-    email: req.body.email,
-    password: req.body.password,
-    // passwordConfirm: req.body.passwordConfirm,
+    name: name.trim(),
+    email: cleanEmail,
+    password,
     role: "user",
   });
 
-  // 2. Log them in immediately (Send Cookie & Token)
-  // We use 201 for "Created"
   createSendToken(newUser, 201, res);
 });
 
