@@ -83,11 +83,12 @@ const HotelSchema = new mongoose.Schema(
 HotelSchema.pre("save", function () {
   if (!this.subscriptionExpiresAt && this.subscriptionPlan === "free_trial") {
     const expiryDate = new Date();
-    expiryDate.setDate(expiryDate.getDate() + 30);
+    expiryDate.setDate(expiryDate.getDate() + 1);
     this.subscriptionExpiresAt = expiryDate;
   }
 });
 
+// SECONDS
 // HotelSchema.pre("save", function () {
 //   if (!this.subscriptionExpiresAt && this.subscriptionPlan === "free_trial") {
 //     const expiryDate = new Date(Date.now() + 1000); // 1 sec for testing
@@ -102,10 +103,23 @@ HotelSchema.virtual("subscriptionStatus").get(function () {
   return this.subscriptionExpiresAt > now ? "active" : "expired";
 });
 
+// HotelSchema.virtual("daysRemaining").get(function () {
+//   const now = new Date();
+//   if (!this.subscriptionExpiresAt || this.subscriptionExpiresAt < now) return 0;
+//   const diffTime = Math.abs(this.subscriptionExpiresAt - now);
+//   return Math.ceil(diffTime / (1000 * 60 * 60 * 24));
+// });
+
 HotelSchema.virtual("daysRemaining").get(function () {
   const now = new Date();
-  if (!this.subscriptionExpiresAt || this.subscriptionExpiresAt < now) return 0;
-  const diffTime = Math.abs(this.subscriptionExpiresAt - now);
+
+  if (!this.subscriptionExpiresAt || this.subscriptionExpiresAt < now) {
+    return 0;
+  }
+
+  const diffTime = this.subscriptionExpiresAt - now;
+
+  // convert milliseconds to days
   return Math.ceil(diffTime / (1000 * 60 * 60 * 24));
 });
 

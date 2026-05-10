@@ -11,6 +11,10 @@ exports.registerHotel = catchAsync(async (req, res, next) => {
   const { name, location, phone } = req.body;
   const ownerId = req.user._id;
 
+  console.log("body:", req.body);
+  console.log("file: ", req.file);
+  console.log("ownerId", ownerId);
+
   // 1. Validation check if image was uploaded by Multer
   if (!req.file) {
     return next(new AppError("Please provide a logo", 400));
@@ -69,6 +73,8 @@ exports.registerHotel = catchAsync(async (req, res, next) => {
     });
   } catch (error) {
     // 6. Rollback: Something went wrong in the DB
+    console.log(error); // ADD THIS
+
     await session.abortTransaction();
 
     // CRITICAL: Delete the uploaded image from Cloudinary
@@ -77,7 +83,7 @@ exports.registerHotel = catchAsync(async (req, res, next) => {
       await cloudinary.uploader.destroy(req.file.filename);
     }
 
-    return next(new AppError("Registration failed. Please try again", 500));
+    return next(error);
   } finally {
     session.endSession();
   }

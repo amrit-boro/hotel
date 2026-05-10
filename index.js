@@ -15,6 +15,7 @@ const hpp = require("hpp");
 const authrouter = require("./router/auth");
 const hotelMenu = require("./router/hotelmenu");
 const hotelMenu_v2 = require("./router/hotelmenu_v2");
+const planrouter = require("./router/planrouter");
 
 const manageHotel = require("./router/managehotel");
 
@@ -49,6 +50,7 @@ app.use(
   cors({
     origin: "http://localhost:5173",
     credentials: true,
+    exposedHeaders: ["X-Subscription-Warning"],
   }),
 );
 // D. Body Parsers
@@ -73,6 +75,7 @@ app.use("/api/v1", manageHotel);
 // app.use("/api/hotelStaff", manageHotelstaff);
 // app.use("/api/v1/menu", hotelMenu);
 app.use("/api/v2/menu", hotelMenu_v2);
+app.use("/api/v1/plan", planrouter);
 // app.use("/api/orders", order);
 
 // 8. ERROR HANDLER
