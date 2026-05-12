@@ -11,14 +11,12 @@ exports.registerHotel = catchAsync(async (req, res, next) => {
   const { name, location, phone } = req.body;
   const ownerId = req.user._id;
 
-  console.log("body:", req.body);
-  console.log("file: ", req.file);
-  console.log("ownerId", ownerId);
-
   // 1. Validation check if image was uploaded by Multer
-  if (!req.file) {
-    return next(new AppError("Please provide a logo", 400));
-  }
+  const logoUrl = req.file
+    ? req.file.path
+    : "https://example.com/default-logo.png";
+
+  const logoUrlPublicId = req.file ? req.file.filename : null;
 
   // 2. Optimization: Check for existing hotel before starting heavy logic
   // Check if owner already has a hotel
@@ -46,8 +44,8 @@ exports.registerHotel = catchAsync(async (req, res, next) => {
           name,
           location,
           phone,
-          logoUrl: req.file.path,
-          logoUrlPublicId: req.file.filename,
+          logoUrl,
+          logoUrlPublicId,
           isActive: true,
           subscriptionPlan: "free_trial",
         },
@@ -99,4 +97,113 @@ exports.getHotel = catchAsync(async (req, res, next) => {
   if (!hotel) return next(new AppError("Hotel not found", 404));
 
   res.status(200).json({ status: "success", data: { hotel } });
+});
+
+// UPDATE HOTEL LOGO
+exports.updateLogo = catchAsync(async (req, res, next) => {
+  const { id } = req.params;
+  console.log(req.file);
+  // Validate hotel id
+  if (!mongoose.Types.ObjectId.isValid(id)) {
+    return next(new AppError("Please provide a valid hotelId", 400));
+  }
+
+  // Check file uploaded
+  if (!req.file) {
+    return next(new AppError("Please upload a logo", 400));
+  }
+
+  // Check hotel exists
+  const hotel = await Hotel.findById(id);
+
+  if (!hotel) {
+    return next(new AppError(`Hotel not found with Id ${id}`, 404));
+  }
+
+  // Authorization check
+  if (hotel.ownerId.toString() !== req.user.id) {
+    return next(new AppError("You are not allowed to update this hotel", 403));
+  }
+
+  // Delete old logo from cloudinary
+  if (hotel.logoUrlPublicId) {
+    await cloudinary.uploader.destroy(hotel.logoUrlPublicId);
+  }
+
+  // New uploaded logo
+  hotel.logoUrl = req.file.path;
+  hotel.logoUrlPublicId = req.file.filename;
+
+  await hotel.save();
+
+  console.log("successfull");
+  res.status(200).json({
+    status: "success",
+    message: "Logo updated successfully",
+    data: {
+      hotel,
+    },
+  });
+});
+
+exports.updateHotel = catchAsync(async (req, res, next) => {
+  const { id } = req.params;
+  console.log(req.file);
+  console.log(req.body);
+  // Validate hotel id
+  if (!mongoose.Types.ObjectId.isValid(id)) {
+    return next(new AppError("Please provide valid hotelId", 400));
+  }
+
+  // Allowed fields
+  const ALLOWED_FIELDS = ["name", "phone", "location"];
+
+  const filterBody = {};
+
+  // Filter req.body fields
+  Object.keys(req.body).forEach((key) => {
+    if (ALLOWED_FIELDS.includes(key)) {
+      filterBody[key] = req.body[key];
+    }
+  });
+
+  // Handle image upload
+  if (req.file) {
+    filterBody.logoUrl = req.file.path;
+
+    // If using Cloudinary
+    filterBody.logoUrlPublicId = req.file.filename;
+  }
+
+  // Check hotel exists
+  const isHotelExists = await Hotel.findById(id);
+
+  if (!isHotelExists) {
+    return next(new AppError(`Hotel not found with Id ${id}`, 404));
+  }
+
+  console.log("filterBody", filterBody);
+
+  // Update hotel
+  const hotel = await Hotel.findOneAndUpdate(
+    {
+      _id: id,
+      ownerId: req.user.id,
+    },
+    {
+      $set: filterBody,
+    },
+    {
+      new: true,
+      runValidators: true,
+    },
+  );
+
+  res.status(200).json({
+    status: "success",
+    message: "Hotel updated successfully",
+    data: {
+      hotel,
+    },
+  });
 });
