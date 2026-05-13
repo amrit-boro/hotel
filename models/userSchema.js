@@ -54,6 +54,8 @@ const UserSchema = new mongoose.Schema(
 
       select: false,
     },
+    isEmailVerified: { type: Boolean, default: false },
+    emailVerifiedAt: { type: Date, default: null },
 
     passwordChangedAt: Date,
 

@@ -47,7 +47,7 @@ app.use(
   cors({
     origin: "http://localhost:5173",
     credentials: true,
-    exposedHeaders: ["X-Subscription-Warning"],
+    exposedHeaders: ["X-Subscription-Warning", "X-Subscription-Expired"],
   }),
 );
 // D. Body Parsers

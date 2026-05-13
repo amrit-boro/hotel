@@ -1,5 +1,6 @@
 const User = require("../models/userSchema");
 const Hotel = require("../models/hotel");
+const OtpModel = require("../models/otp");
 
 const { promisify } = require("util");
 const sendEmail = require("../utils/email");
@@ -133,46 +134,196 @@ exports.protect = catchAsync(async (req, res, next) => {
 
 // const generateToken = (payload) => {};
 
+// ─────────────────────────────────────────────────────────────
+// STEP 2 — Verify OTP: confirm email, issue JWT
+// ─────────────────────────────────────────────────────────────
+exports.verifyEmail = catchAsync(async (req, res, next) => {
+  const { email, otp } = req.body;
+
+  if (!email || !otp)
+    return next(new AppError("Email and OTP are required", 400));
+
+  const cleanEmail = email.trim().toLowerCase();
+  const cleanOtp = otp.trim();
+
+  // ── Verify against OTP collection ──────────────────────────
+  const result = await OtpModel.verifyOtp(
+    cleanEmail,
+    "email_verification",
+    cleanOtp,
+  );
+
+  if (!result.success) {
+    // Map internal reasons to safe user-facing messages
+    const messages = {
+      "OTP not found or expired": "OTP is invalid or has expired.",
+      "Max attempts exceeded":
+        "Too many failed attempts. Please request a new OTP.",
+      "Invalid OTP": `Incorrect OTP. ${result.attemptsRemaining} attempt(s) remaining.`,
+    };
+
+    const statusCodes = {
+      "OTP not found or expired": 400,
+      "Max attempts exceeded": 429,
+      "Invalid OTP": 400,
+    };
+
+    return next(
+      new AppError(
+        messages[result.reason] ?? "Verification failed.",
+        statusCodes[result.reason] ?? 400,
+      ),
+    );
+  }
+
+  // ── Mark user as verified ───────────────────────────────────
+  const user = await User.findOneAndUpdate(
+    { email: cleanEmail },
+    { isEmailVerified: true, emailVerifiedAt: new Date() },
+    { new: true },
+  );
+
+  if (!user) return next(new AppError("User not found.", 404));
+
+  // ── Issue JWT and log in ────────────────────────────────────
+  createSendToken(user, 200, res);
+});
+
+// ─────────────────────────────────────────────────────────────
+// STEP 3 — Resend OTP (standalone endpoint)
+// ─────────────────────────────────────────────────────────────
+exports.resendOtp = catchAsync(async (req, res, next) => {
+  const cleanEmail = req.body.email?.trim().toLowerCase();
+
+  if (!cleanEmail) return next(new AppError("Email is required", 400));
+
+  const user = await User.findOne({ email: cleanEmail });
+
+  if (!user) return next(new AppError("No account found with this email", 404));
+
+  if (user.isEmailVerified)
+    return next(new AppError("Email is already verified", 400));
+
+  // ── Cooldown guard ──────────────────────────────────────────
+  const { allowed, waitSeconds } = await OtpModel.canResend(
+    cleanEmail,
+    "email_verification",
+  );
+
+  if (!allowed)
+    return next(
+      new AppError(
+        `Please wait ${waitSeconds} second(s) before requesting a new OTP`,
+        429,
+      ),
+    );
+
+  // ── Issue new OTP (revokes previous ones automatically) ─────
+  const { otpRecord, plainOtp } = await OtpModel.createOtp({
+    identifier: cleanEmail,
+    identifierType: "email",
+    purpose: "email_verification",
+    deliveryChannel: "email",
+    userId: user._id,
+    ipAddress: req.ip,
+    userAgent: req.headers["user-agent"],
+  });
+
+  await sendEmail.sendOtpEmail(cleanEmail, plainOtp, user.name);
+  await otpRecord.markDelivered("sent");
+
+  res.status(200).json({
+    status: "success",
+    message: "A new OTP has been sent to your email.",
+  });
+});
+
 exports.register = catchAsync(async (req, res, next) => {
   const { name, email, password } = req.body;
 
-  // Validate name
-  if (!name || name.trim().length < 2) {
+  // ── Validation ──────────────────────────────────────────────
+  if (!name || name.trim().length < 2)
     return next(new AppError("Name must be at least 2 characters", 400));
-  }
 
-  // Validate email
   const cleanEmail = email?.trim().toLowerCase();
-
   const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/;
-
-  if (!cleanEmail || !emailRegex.test(cleanEmail)) {
+  if (!cleanEmail || !emailRegex.test(cleanEmail))
     return next(new AppError("Please provide a valid email", 400));
-  }
 
-  // Validate password
-  if (!password || password.length < 6) {
+  if (!password || password.length < 6)
     return next(new AppError("Password must be at least 6 characters", 400));
-  }
 
-  // Check existing user
-  const existingUser = await User.findOne({
-    email: cleanEmail,
-  });
+  // ── Duplicate check ─────────────────────────────────────────
+  const existingUser = await User.findOne({ email: cleanEmail });
 
   if (existingUser) {
-    return next(new AppError("Email already registered", 400));
+    // Already verified → reject
+    if (existingUser.isEmailVerified)
+      return next(new AppError("Email already registered", 409));
+
+    // Unverified stale account → resend OTP instead of blocking
+    const { allowed, waitSeconds } = await OtpModel.canResend(
+      cleanEmail,
+      "email_verification",
+    );
+
+    if (!allowed)
+      return next(
+        new AppError(
+          `Please wait ${waitSeconds}s before requesting a new OTP`,
+          429,
+        ),
+      );
+
+    const { otpRecord, plainOtp } = await OtpModel.createOtp({
+      identifier: cleanEmail,
+      identifierType: "email",
+      purpose: "email_verification",
+      deliveryChannel: "email",
+      userId: existingUser._id,
+      ipAddress: req.ip,
+      userAgent: req.headers["user-agent"],
+    });
+
+    await sendEmail.sendOtpEmail(cleanEmail, plainOtp, existingUser.name);
+    await otpRecord.markDelivered("sent");
+
+    return res.status(200).json({
+      status: "pending",
+      message: "OTP resent. Please verify your email to continue.",
+    });
   }
 
-  // Create user
+  // ── Create unverified user ──────────────────────────────────
+  // isEmailVerified defaults to false — user can't log in yet
   const newUser = await User.create({
     name: name.trim(),
     email: cleanEmail,
     password,
     role: "user",
+    isEmailVerified: false,
   });
 
-  createSendToken(newUser, 201, res);
+  // ── Generate & send OTP ─────────────────────────────────────
+  const { otpRecord, plainOtp } = await OtpModel.createOtp({
+    identifier: cleanEmail,
+    identifierType: "email",
+    purpose: "email_verification",
+    deliveryChannel: "email",
+    userId: newUser._id,
+    ipAddress: req.ip,
+    userAgent: req.headers["user-agent"],
+  });
+
+  await sendEmail.sendOtpEmail(cleanEmail, plainOtp, newUser.name);
+  await otpRecord.markDelivered("sent");
+
+  res.status(201).json({
+    status: "pending",
+    message: "Registration successful. Check your email for the OTP.",
+    // Return email so the frontend can pre-fill the verify form
+    data: { email: cleanEmail },
+  });
 });
 
 // Google callback
@@ -362,10 +513,14 @@ exports.checkSubscription = catchAsync(async (req, res, next) => {
   // 5) Use the virtual to check subscription status
   //    virtual returns "active" | "expired"  (see your schema)
   if (hotel.subscriptionStatus === "expired") {
+    res.set(
+      "X-Subscription-Expired",
+      `Your ${formatPlan(hotel.subscriptionPlan)} has expired. Please renew your subscription to continue.`,
+    );
+
     return next(
       new AppError(
-        `Your ${formatPlan(hotel.subscriptionPlan)} has expired. ` +
-          "Please renew your subscription to continue.",
+        `Your ${formatPlan(hotel.subscriptionPlan)} has expired. Please renew your subscription to continue.`,
         403,
       ),
     );

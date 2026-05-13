@@ -5,6 +5,8 @@ const router = express.Router();
 const passport = require("../utils/googleAuth");
 
 router.post("/signup", authController.register);
+router.post("/verify-email", authController.verifyEmail);
+router.post("/resend-otp", authController.resendOtp);
 router.post("/login", authController.login);
 router.post("/logout", authController.logout);
 router.get("/getAllusers", authController.protect, userController.getAllusers);
