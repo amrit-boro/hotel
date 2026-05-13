@@ -122,26 +122,30 @@ exports.getCategoriesViewData = catchAsync(async (req, res, next) => {
  * 5) Create a complete menu with multiple items
  */
 exports.createCategory = catchAsync(async (req, res, next) => {
-  const { hotelId, categoryName, veg, image, isAvailable } = req.body;
+  const { hotelId, categoryName, veg, isAvailable } = req.body;
 
   // 1) Validate required fields
   if (!hotelId) {
-    return next(new AppError("Hotel ID is required.", 400)); // Fixed typo
+    return next(new AppError("Hotel ID is required.", 400));
   }
 
   if (!categoryName) {
     return next(new AppError("Category Name is required.", 400));
   }
 
-  // 2) Validate MongoDB ObjectId format
-  if (!mongoose.Types.ObjectId.isValid(hotelId)) {
-    return next(new AppError("Invalid hotel ID format.", 400)); // Added missing 400 status
+  if (veg === undefined || veg === null || veg === "") {
+    return next(new AppError("Veg field is required.", 400));
   }
 
-  // Clean the input to prevent trailing space bugs
+  // 2) Validate MongoDB ObjectId format
+  if (!mongoose.Types.ObjectId.isValid(hotelId)) {
+    return next(new AppError("Invalid hotel ID format.", 400));
+  }
+
+  // 3) Clean the input to prevent trailing space bugs
   const cleanName = categoryName.trim();
 
-  // 3) Check for duplicate category name within the same hotel
+  // 4) Check for duplicate category name within the same hotel
   const existingCategory = await MenuCategory.findOne({
     hotelId: new mongoose.Types.ObjectId(hotelId),
     softDeleted: false,
@@ -157,25 +161,31 @@ exports.createCategory = catchAsync(async (req, res, next) => {
     return next(new AppError(`Category '${cleanName}' already exists.`, 400));
   }
 
-  // 4) Construct the payload
+  // 5) Build image object from multer-cloudinary result
+  const image = req.file
+    ? { url: req.file.path, publicId: req.file.filename }
+    : { url: "", publicId: "" };
+
+  // 6) Construct the payload
   const categoryData = {
     hotelId,
-    categoryName: cleanName, // FIX: Save the cleaned name to the database
-    ...(veg !== undefined && { veg }), // Safety check in case veg is false
-    ...(image && { image }),
+    categoryName: cleanName,
+    veg, // ← was missing
+    image,
     ...(isAvailable !== undefined && { isAvailable }),
   };
 
-  // 5) Save to Database
+  // 7) Save to Database
   const newCategory = await MenuCategory.create(categoryData);
 
-  // 6) Send Response
+  // 8) Send Response
   res.status(201).json({
     success: true,
     message: "Menu category created successfully.",
     data: newCategory,
   });
 });
+
 // Delete category
 exports.deleteCategory = catchAsync(async (req, res, next) => {
   const { categoryId } = req.params;

@@ -83,7 +83,7 @@ const HotelSchema = new mongoose.Schema(
 HotelSchema.pre("save", function () {
   if (!this.subscriptionExpiresAt && this.subscriptionPlan === "free_trial") {
     const expiryDate = new Date();
-    expiryDate.setDate(expiryDate.getDate() + 1);
+    expiryDate.setDate(expiryDate.getDate() + 30);
     this.subscriptionExpiresAt = expiryDate;
   }
 });
