@@ -85,7 +85,7 @@ exports.getCategoriesViewData = catchAsync(async (req, res, next) => {
 
   // 2. Fetch categories
   const categoriesRaw = await MenuCategory.find({ hotelId })
-    .select("categoryName")
+    .select("categoryName image")
     .lean();
 
   const counts = await MenuItem.aggregate([
@@ -106,6 +106,7 @@ exports.getCategoriesViewData = catchAsync(async (req, res, next) => {
   const categories = categoriesRaw.map((c) => ({
     _id: c._id,
     name: c.categoryName,
+    url: c.image?.url || null,
     itemCount: countMap[c._id.toString()] || 0,
   }));
   // 5. Send response
@@ -131,10 +132,6 @@ exports.createCategory = catchAsync(async (req, res, next) => {
 
   if (!categoryName) {
     return next(new AppError("Category Name is required.", 400));
-  }
-
-  if (veg === undefined || veg === null || veg === "") {
-    return next(new AppError("Veg field is required.", 400));
   }
 
   // 2) Validate MongoDB ObjectId format
@@ -170,7 +167,6 @@ exports.createCategory = catchAsync(async (req, res, next) => {
   const categoryData = {
     hotelId,
     categoryName: cleanName,
-    veg, // ← was missing
     image,
     ...(isAvailable !== undefined && { isAvailable }),
   };

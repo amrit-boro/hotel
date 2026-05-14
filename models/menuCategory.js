@@ -17,12 +17,6 @@ const MenuCategorySchema = new mongoose.Schema(
       index: true,
     },
 
-    veg: {
-      type: Boolean,
-      required: true,
-      index: true,
-    },
-
     image: {
       url: { type: String, default: "" },
       publicId: { type: String, default: "" },
